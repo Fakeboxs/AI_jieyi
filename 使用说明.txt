@@ -59,6 +59,17 @@
 2. 下载资源包：在「资源包」里点「下载」，有进度条；下完就可以拔网线了
    - 文件落在 %APPDATA%\app.jieyi.desktop\models，换机器时整目录拷过去即可
    - 走的是 hf-mirror / gh-proxy 镜像，断了下一次会续传，坏包会自动重下
+
+   也可以自己手动下（应用不上传这些大文件，链接与内置清单一致）：
+   - 运行时：github.com/ggml-org/llama.cpp/releases/download/b12500/llama-b12500-bin-win-vulkan-x64.zip
+     （国内打不开就在前面加 https://gh-proxy.com/），解压到 models\runtime\，里面要有 llama-server.exe
+   - 视觉包：
+     huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf
+     huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf
+     两个都放进 models\vlm\（域名换成 hf-mirror.com 更快）
+   - 轻量包：
+     huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+     放进 models\ocr\
 3. 点「测试连接」：会真的把本地模型加载起来，显示「本地引擎已就绪（http://127.0.0.1:端口，用时 x.xs）」
 4. 之后 Ctrl+Alt+S 截图翻译，流程和云端完全一样；首次翻译会自动加载模型（几秒到十几秒）
 

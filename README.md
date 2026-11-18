@@ -24,7 +24,7 @@
 24||---|---|---|
 | `JieYi_0.6.0_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
 | `JieYi-0.6.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
-| `JieYi-0.6.0-offline-win64.zip.001/.002` | 3.6 GB | **带资源包版**：解压即可断网翻译，不用再下载模型 |
+| 离线模型（不入库） | 39 MB / 2.8 GB / 1.1 GB | **资源包不随发布上传**，按下表链接自行下载，见「离线翻译」一节的目录结构 |
 27|
 28|首次运行若被 SmartScreen 拦下：**更多信息 → 仍要运行**（安装包未做代码签名）。
 29|
@@ -95,12 +95,29 @@
 >
 > 轻量引擎用的是 Windows 自带的 OCR，识别精度取决于系统语言包（设置 → 时间和语言 → 语言 → 可选功能 → OCR）；对英文会有零星空格与字母混淆，公式基本不保。
 
-### 两个发布版本
+### 资源包链接（不随 Release 上传）
 
-- **联网版**（上面表格前两行）：~4 MB，模型按需下载，适合绝大多数人。
-- **带资源包版**（`offline-win64.zip.001/.002`）：3.6 GB，因为 GitHub 单文件上限 2 GB 才拆成两段；下载后 `copy /b JieYi-0.6.0-offline-win64.zip.001 + JieYi-0.6.0-offline-win64.zip.002 JieYi-0.6.0-offline-win64.zip` 合并再解压，里面已经含 `models/`，解压即用。
+模型文件体积大，**不作为发布资产**；要么让应用自己下（设置里点「下载」，走的就是这些地址），要么手动下好放进目录。版本固定在下面这一组，与内置清单一致：
 
-自己打这个包：`python scripts/make_offline_bundle.py`（会从本机 `models` 目录取资源并自动分包）。
+| 文件 | 直链 | 国内镜像 | 大小 |
+|---|---|---|---|
+| llama.cpp 运行时（Vulkan x64） | `github.com/ggml-org/llama.cpp/releases/download/b12500/llama-b12500-bin-win-vulkan-x64.zip` | 前缀加 `https://gh-proxy.com/` | 39 MB |
+| 视觉模型 Qwen2.5-VL-3B Q4_K_M | `huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf` | 域名换 `hf-mirror.com` | 1.93 GB |
+| 视觉投影层 mmproj Q8_0 | 同上目录 `mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf` | 同上 | 845 MB |
+| 轻量翻译模型 Qwen2.5-1.5B Q4_K_M | `huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf` | 同上 | 1.12 GB |
+
+手动放置位置（`%APPDATA%\app.jieyi.desktop\models`）：
+
+```
+models/
+├─ runtime/   ← 把 llama-b12500-bin-win-vulkan-x64.zip 解压到这里（要有 llama-server.exe）
+├─ vlm/       ← Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf + mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf
+└─ ocr/       ← Qwen2.5-1.5B-Instruct-q4_k_m.gguf
+```
+
+只想要视觉引擎就只放 `runtime/` + `vlm/`；只想要轻量引擎放 `runtime/` + `ocr/`。放好后在设置里点「测试连接」，成功会显示「本地引擎已就绪（http://127.0.0.1:端口）」。应用只校验文件大小（≥99.9%）和 GGUF magic，不校验哈希，所以官方原版文件都能用。
+
+想给别人一个「解压即用」的整包：`python scripts/make_offline_bundle.py`，它会把当前 `models` 与便携版打成一个 zip（超过 1.8 GB 自动切 `.001/.002`），产物留在本机、不上传。
 
 ## 界面
 78|
