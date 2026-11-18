@@ -20,6 +20,7 @@ export default defineConfig({
       input: {
         main: entry("./index.html"),
         overlay: entry("./overlay.html"),
+        popup: entry("./popup.html"),
       },
     },
   },

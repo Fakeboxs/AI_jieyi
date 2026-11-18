@@ -39,6 +39,8 @@ pub struct Config {
     pub capture_screen: i32,
     /// 再次截图时预选上次的框选区域
     pub remember_region: bool,
+    /// "popup" = 在选区旁边弹一个窄的独立小窗；"main" = 回到主窗口
+    pub result_window: String,
     pub advanced: Advanced,
 }
 
@@ -56,6 +58,7 @@ impl Default for Config {
             stream: true,
             capture_screen: -1,
             remember_region: true,
+            result_window: "popup".into(),
             advanced: Advanced::default(),
         }
     }

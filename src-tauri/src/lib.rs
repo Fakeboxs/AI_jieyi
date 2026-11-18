@@ -14,6 +14,20 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+/// Everything the popup needs to repaint itself if it mounts mid-run.
+#[derive(Clone, serde::Serialize, Default)]
+pub struct RunSnapshot {
+    pub id: String,
+    pub provider: String,
+    pub model: String,
+    pub stream: bool,
+    pub image_count: usize,
+    pub target: String,
+    pub text: String,
+    pub done: bool,
+    pub started_ms: u64,
+}
+
 pub struct AppState {
     config_dir: PathBuf,
     cfg: Mutex<Config>,
@@ -23,6 +37,7 @@ pub struct AppState {
     /// flag of the currently running translation (created per run)
     cancel: Mutex<Arc<AtomicBool>>,
     last_region: Mutex<Option<[f64; 4]>>,
+    run: Mutex<RunSnapshot>,
 }
 
 #[derive(serde::Deserialize, Clone, Copy)]
@@ -60,6 +75,39 @@ fn delete_entry(state: State<'_, AppState>, id: String) -> Result<(), String> {
 #[tauri::command]
 fn update_tags(state: State<'_, AppState>, id: String, tags: Vec<String>) -> Result<(), String> {
     state.store.lock().unwrap().update_tags(&id, &tags)
+}
+
+#[tauri::command]
+fn delete_entries(state: State<'_, AppState>, ids: Vec<String>) -> Result<usize, String> {
+    state.store.lock().unwrap().delete_many(&ids)
+}
+
+#[tauri::command]
+fn clear_entries(state: State<'_, AppState>) -> Result<usize, String> {
+    state.store.lock().unwrap().clear()
+}
+
+/// Popup calls this right after mounting: it may have missed start/chunks.
+#[tauri::command]
+fn run_snapshot(state: State<'_, AppState>) -> RunSnapshot {
+    state.run.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn hide_popup(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("popup") {
+        let _ = win.hide();
+    }
+}
+
+/// From the popup: reveal the same entry in the main window.
+#[tauri::command]
+fn open_in_main(app: AppHandle, id: String) {
+    if let Some(win) = app.get_webview_window("popup") {
+        let _ = win.hide();
+    }
+    focus_main(&app);
+    let _ = app.emit("entry:open", serde_json::json!({ "id": id }));
 }
 
 #[tauri::command]
@@ -164,6 +212,25 @@ async fn translate_regions(
     }
 
     let cfg = state.cfg.lock().unwrap().clone();
+    let target = result_target(&cfg);
+
+    // Screen-space geometry for the popup: monitor origin (logical) + selection.
+    if target == "popup" {
+        let s = if shot.scale > 0.0 { shot.scale } else { 1.0 };
+        let mon = [
+            shot.monitor.x as f64 / s,
+            shot.monitor.y as f64 / s,
+            shot.monitor.width as f64 / s,
+            shot.monitor.height as f64 / s,
+        ];
+        if let Some(first) = rects.first() {
+            let anchor = [mon[0] + first.x, mon[1] + first.y, first.w, first.h];
+            if let Err(e) = show_popup(&app, anchor, mon) {
+                let _ = app.emit("translation:error", serde_json::json!({ "message": e }));
+            }
+        }
+    }
+
     let client = state.client.clone();
     let handle = app.clone();
     let id = uuid::Uuid::new_v4().to_string();
@@ -171,7 +238,7 @@ async fn translate_regions(
     *state.cancel.lock().unwrap() = cancel.clone();
 
     tauri::async_runtime::spawn(async move {
-        match execute(&handle, &client, &cfg, pngs.clone(), &id, cancel).await {
+        match execute(&handle, &client, &cfg, pngs.clone(), &id, cancel, target).await {
             Ok(result) => {
                 let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
                 let stored = {
@@ -192,9 +259,11 @@ async fn translate_regions(
                     Ok(()) => {
                         let _ = handle.emit(
                             "translation:done",
-                            serde_json::json!({ "id": id, "cancelled": result.cancelled }),
+                            serde_json::json!({ "id": id, "cancelled": result.cancelled, "target": target }),
                         );
-                        focus_main(&handle);
+                        if target != "popup" {
+                            focus_main(&handle);
+                        }
                     }
                     Err(message) => {
                         let _ = handle.emit("translation:error", serde_json::json!({ "message": message }));
@@ -235,7 +304,7 @@ async fn retranslate(app: AppHandle, state: State<'_, AppState>, id: String) -> 
     *state.cancel.lock().unwrap() = cancel.clone();
 
     tauri::async_runtime::spawn(async move {
-        match execute(&handle, &client, &cfg, pngs, &id, cancel).await {
+        match execute(&handle, &client, &cfg, pngs, &id, cancel, "main").await {
             Ok(result) => {
                 let saved = {
                     let st = handle.state::<AppState>();
@@ -350,6 +419,68 @@ fn focus_main(app: &AppHandle) {
     }
 }
 
+fn result_target(cfg: &Config) -> &'static str {
+    if cfg.result_window == "main" {
+        "main"
+    } else {
+        "popup"
+    }
+}
+
+/// Narrow always-on-top window that sits next to the selection, so a hotkey
+/// translation never has to pull the whole main window in front of the user.
+fn show_popup(app: &AppHandle, anchor: [f64; 4], bounds: [f64; 4]) -> Result<(), String> {
+    const W: f64 = 460.0;
+    let h = (anchor[3] + 150.0).clamp(300.0, 620.0);
+
+    let mut x = anchor[0] + anchor[2] + 14.0;
+    if x + W > bounds[0] + bounds[2] {
+        x = anchor[0] - W - 14.0;
+    }
+    let max_x = (bounds[0] + bounds[2] - W - 8.0).max(bounds[0] + 8.0);
+    x = x.clamp(bounds[0] + 8.0, max_x);
+
+    let mut y = anchor[1];
+    if y + h > bounds[1] + bounds[3] - 8.0 {
+        y = bounds[1] + bounds[3] - h - 8.0;
+    }
+    y = y.max(bounds[1] + 8.0);
+
+    if let Some(win) = app.get_webview_window("popup") {
+        let _ = win.set_size(tauri::LogicalSize::new(W, h));
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        let _ = win.emit("popup:reset", ());
+        return Ok(());
+    }
+
+    let win = tauri::WebviewWindowBuilder::new(app, "popup", tauri::WebviewUrl::App("popup.html".into()))
+        .title("截译 · 译文")
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(true)
+        .min_inner_size(360.0, 240.0)
+        .inner_size(W, h)
+        .position(x, y)
+        .focused(true)
+        .transparent(true)
+        .shadow(false)
+        .build()
+        .map_err(|e| format!("打开译文窗口失败：{e}"))?;
+
+    let handle = win.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = handle.hide();
+        }
+    });
+    Ok(())
+}
+
 fn show_overlay(app: &AppHandle, monitor: capture::Rect, scale: f64) -> Result<(), String> {
     let s = if scale > 0.0 { scale } else { 1.0 };
     let x = monitor.x as f64 / s;
@@ -393,8 +524,30 @@ async fn execute(
     pngs: Vec<Vec<u8>>,
     id: &str,
     cancel: Arc<AtomicBool>,
+    target: &'static str,
 ) -> Result<providers::Translation, String> {
     let b64s: Vec<String> = pngs.iter().map(|b| base64_encode(b)).collect();
+    let started_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    {
+        // The popup window is created before this runs, so it can mount late:
+        // keep a snapshot it can pull instead of losing the first chunks.
+        let st = app.state::<AppState>();
+        let mut run = st.run.lock().unwrap();
+        *run = RunSnapshot {
+            id: id.to_string(),
+            provider: cfg.provider.clone(),
+            model: cfg.model(),
+            stream: cfg.stream,
+            image_count: pngs.len(),
+            target: target.to_string(),
+            text: String::new(),
+            done: false,
+            started_ms,
+        };
+    }
     let _ = app.emit(
         "translation:start",
         serde_json::json!({
@@ -403,25 +556,43 @@ async fn execute(
             "model": cfg.model(),
             "stream": cfg.stream,
             "image_count": pngs.len(),
+            "target": target,
         }),
     );
-
-    // Bring the shell forward immediately, otherwise SSE text is generated
-    // into a window the user cannot see.
-    focus_main(app);
 
     if cfg.stream {
         let handle = app.clone();
         let stream_id = id.to_string();
-        providers::translate_stream(client, cfg, &b64s, cancel, move |delta| {
+        let result = providers::translate_stream(client, cfg, &b64s, cancel, move |delta| {
+            {
+                let st = handle.state::<AppState>();
+                let mut run = st.run.lock().unwrap();
+                run.text.push_str(delta);
+            }
             let _ = handle.emit(
                 "translation:chunk",
                 serde_json::json!({ "id": stream_id, "text": delta }),
             );
         })
-        .await
+        .await;
+        finish_run(app, &result);
+        result
     } else {
-        providers::translate(client, cfg, &b64s).await
+        let result = providers::translate(client, cfg, &b64s).await;
+        finish_run(app, &result);
+        result
+    }
+}
+
+/// Mark the snapshot finished with the authoritative final text.
+fn finish_run(app: &AppHandle, result: &Result<providers::Translation, String>) {
+    let st = app.state::<AppState>();
+    let mut run = st.run.lock().unwrap();
+    run.done = true;
+    if let Ok(t) = result {
+        if !t.text.is_empty() {
+            run.text = t.text.clone();
+        }
     }
 }
 
@@ -480,12 +651,23 @@ fn trigger_repeat(app: &AppHandle) {
         };
         let st = handle.state::<AppState>();
         let cfg = st.cfg.lock().unwrap().clone();
+        let target = result_target(&cfg);
+        if target == "popup" {
+            let s = if shot.scale > 0.0 { shot.scale } else { 1.0 };
+            let mon = [
+                shot.monitor.x as f64 / s,
+                shot.monitor.y as f64 / s,
+                shot.monitor.width as f64 / s,
+                shot.monitor.height as f64 / s,
+            ];
+            let _ = show_popup(&handle, [mon[0] + x, mon[1] + y, w, h], mon);
+        }
         let client = st.client.clone();
         let id = uuid::Uuid::new_v4().to_string();
         let cancel = Arc::new(AtomicBool::new(false));
         *st.cancel.lock().unwrap() = cancel.clone();
 
-        match execute(&handle, &client, &cfg, vec![png.clone()], &id, cancel).await {
+        match execute(&handle, &client, &cfg, vec![png.clone()], &id, cancel, target).await {
             Ok(result) => {
                 let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
                 let stored = {
@@ -575,6 +757,7 @@ pub fn run() {
                 client,
                 cancel: Mutex::new(Arc::new(AtomicBool::new(false))),
                 last_region: Mutex::new(last_region),
+                run: Mutex::new(RunSnapshot::default()),
             });
 
             // global hotkeys: Ctrl+Alt+S 截图, Ctrl+Alt+D 重复上次区域
@@ -648,6 +831,11 @@ pub fn run() {
             delete_entry,
             update_tags,
             list_monitors,
+            delete_entries,
+            clear_entries,
+            hide_popup,
+            open_in_main,
+            run_snapshot,
             export_markdown,
             get_shot,
             start_capture,

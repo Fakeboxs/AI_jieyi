@@ -116,3 +116,50 @@ export function Section({
     </section>
   );
 }
+
+/** Small in-app confirmation dialog: used for destructive archive actions. */
+export function Confirm({
+  open,
+  title,
+  body,
+  confirmLabel = "确定",
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  body?: string;
+  confirmLabel?: string;
+  busy?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+      if (e.key === "Enter") onConfirm();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel, onConfirm]);
+
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()}>
+        <h3>{title}</h3>
+        {body ? <p>{body}</p> : null}
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={onCancel} disabled={busy}>
+            取消
+          </button>
+          <button className="btn btn-danger" onClick={onConfirm} disabled={busy}>
+            {busy ? "处理中…" : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

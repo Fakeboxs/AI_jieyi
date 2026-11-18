@@ -21,6 +21,7 @@ export const MOCK_CONFIG: Config = {
   stream: true,
   capture_screen: -1,
   remember_region: true,
+  result_window: "popup",
   advanced: { endpoint: "", headers: [], body: "", response_path: "" },
 };
 

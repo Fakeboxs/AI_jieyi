@@ -153,6 +153,33 @@ impl Store {
         Ok(())
     }
 
+    /// Delete several entries (and their screenshots) in one call.
+    pub fn delete_many(&self, ids: &[String]) -> Result<usize, String> {
+        let mut removed = 0usize;
+        for id in ids {
+            self.delete(id)?;
+            removed += 1;
+        }
+        Ok(removed)
+    }
+
+    /// Wipe every entry plus the image files on disk.
+    pub fn clear(&self) -> Result<usize, String> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0))
+            .unwrap_or(0);
+        if let Ok(entries) = std::fs::read_dir(&self.images_dir) {
+            for entry in entries.flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+        self.conn
+            .execute("DELETE FROM entries", [])
+            .map_err(|e| e.to_string())?;
+        Ok(count as usize)
+    }
+
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let images: Option<String> = self
             .conn

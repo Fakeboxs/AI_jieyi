@@ -22,14 +22,14 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 
 | 文件 | 大小 | 适合 |
 |---|---|---|
-| `JieYi_0.2.2_x64-setup.exe` | 3.9 MB | 推荐。当前用户安装（无需管理员），中文向导，缺 WebView2 自动下载 |
-| `JieYi-0.2.2-portable-win64.zip` | 4.68 MB | 便携版，解压即用 |
+| `JieYi_0.3.0_x64-setup.exe` | 4.0 MB | 推荐。当前用户安装（无需管理员），中文向导，缺 WebView2 自动下载 |
+| `JieYi-0.3.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
 
 首次运行若被 SmartScreen 拦下：**更多信息 → 仍要运行**（安装包未做代码签名）。
 
 ## 快捷键
 
-| 按键 | 作用 |
+| 快捷键 | 作用 |
 |---|---|
 | `Ctrl+Alt+S` | 截图（冻结鼠标所在屏幕 / 设置里指定的屏幕）并框选 |
 | `Ctrl+Alt+D` | 重复上次区域，不弹选区直接翻译 |
@@ -45,6 +45,7 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 - **多块合并翻译**：一次可以连续拖出多个框，`Enter` 把 N 块一起发给模型（一次请求、一份译文），`Backspace` 撤销上一块
 - **上次选区记忆**：再次截图时用虚线预选上次的框（可直接 `Enter` 复用，也可以随手拖新框顶掉它）；`Ctrl+Alt+D` 则完全跳过选区，直接按上次位置翻译
 - **多显示器**：设置里可选「跟随鼠标所在屏幕」或固定某一块屏幕
+- **结果用独立小窗**：热键翻译的译文出现在选区旁边的窄边置顶浮窗（460px、无标题栏、可拖动缩放），不打断你正在做的事；可在设置里切回主窗口
 - **流式 / 直出可选**：SSE 流式（默认，首字即显示、边生成边排版、末尾打字光标）或一次性直出；**流式中途可以随时「停止」**，已生成的部分会保留并照常入库
 - **多服务商**：OpenAI 兼容（SiliconFlow / DashScope 兼容模式 / 本地 vLLM、Xinference）、Anthropic `/v1/messages`、Gemini `generateContent`、自定义端点
 - **高级 API 模板**：自己写 endpoint / headers / request body，用 `{{model}}`、`{{prompt_json}}`、`{{image_parts}}`、`{{stream}}`、`{{api_key}}` 等占位符拼装，响应字段用 JSON Pointer 指定——任何非标准协议都能接
@@ -55,7 +56,7 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 - **一键复制**：主按钮复制 Markdown 译文，另可复制纯文本；按钮变绿 + toast 提示
 - **标签**：结果页底部直接加/删标签（回车确认），归档页按标签过滤
 - **导出 .md**：一键另存为 Markdown（自动带上标签与来源脚注）
-- **归档**：SQLite 自动保存每次翻译（含截图 PNG）、按天分组、全文搜索、重新翻译、删除
+- **归档**：SQLite 自动保存每次翻译（含截图 PNG）、按天分组、全文搜索、重新翻译、删除；支持**批量勾选删除**与**一键清空**（都会连同截图文件一起清理，操作前有确认弹窗）
 
 **外壳**
 
@@ -65,13 +66,13 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 
 ## 界面
 
-| 流式生成中（可随时停止） | 归档 |
+| 选区旁的独立小窗 | 流式生成中（可随时停止） |
 |---|---|
-| ![流式](docs/screenshots/streaming.png) | ![归档](docs/screenshots/archive.png) |
+| ![小窗](docs/screenshots/popup.png) | ![流式](docs/screenshots/streaming.png) |
 
-| 高级 API 模板 | 安装向导 |
+| 高级 API 模板 | 归档 |
 |---|---|
-| ![设置](docs/screenshots/settings-advanced.png) | ![安装](docs/screenshots/installer.png) |
+| ![设置](docs/screenshots/settings-advanced.png) | ![归档](docs/screenshots/archive.png) |
 
 ## 系统要求
 
@@ -192,14 +193,14 @@ python scripts/make_release.py         # 汇总 dist-release：安装包 + 便�
 
 | 文件 | 说明 |
 |---|---|
-| `JieYi_0.2.2_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
-| `JieYi-0.2.2-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
+| `JieYi_0.3.0_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
+| `JieYi-0.3.0-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
 | `发布说明.md` / `SHA256SUMS.txt` | 面向用户的说明与校验和 |
 
 **未做代码签名**，分发时提醒用户：SmartScreen 提示 → 更多信息 → 仍要运行。要彻底消除需要签名证书：
 
 ```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.2.2_x64-setup.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.3.0_x64-setup.exe
 ```
 
 > 改了 `productName`（当前为「截译」）会同时改变安装目录、快捷方式与「应用」里的显示名；`identifier` 保持不变，所以升级不会丢数据。

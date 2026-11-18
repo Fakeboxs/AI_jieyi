@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileText, Plus, RefreshCw, Square, Tag, Trash2, X } from "lucide-react";
+import { CheckSquare, Download, FileText, Plus, RefreshCw, Square, Tag, Trash2, X } from "lucide-react";
 import type { Entry } from "../types";
 import { copyText } from "../lib/bridge";
 import { renderMarkdown, toPlainText, trimIncompleteMath } from "../lib/markdown";
@@ -258,10 +258,31 @@ export function StreamingResult({
   );
 }
 
-export function EntryPreview({ entry, onDelete }: { entry: Entry; onDelete?: (id: string) => void }) {
+export function EntryPreview({
+  entry,
+  onDelete,
+  selected,
+  onToggle,
+}: {
+  entry: Entry;
+  onDelete?: (id: string) => void;
+  selected?: boolean;
+  onToggle?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
-    <div>
+    <div className="entry-wrap" data-selected={selected ? "true" : undefined}>
+      {onToggle ? (
+        <button
+          className="entry-check"
+          onClick={onToggle}
+          aria-pressed={selected}
+          aria-label={selected ? "取消选中" : "选中这条记录"}
+          title={selected ? "取消选中" : "选中这条记录"}
+        >
+          {selected ? <CheckSquare size={15} /> : <Square size={15} />}
+        </button>
+      ) : null}
       <button className="entry" data-open={open} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <span className="entry-title">{firstLine(entry.markdown) || "（空译文）"}</span>
         <span className="entry-row">

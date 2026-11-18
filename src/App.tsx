@@ -16,10 +16,13 @@ import {
   loadConfig,
   onTranslationChunk,
   onTranslationDone,
+  onEntryOpen,
   onTranslationError,
   onTranslationStart,
   retranslate,
   cancelTranslation,
+  clearEntries,
+  deleteEntries,
   exportMarkdown,
   saveConfig,
   startCapture,
@@ -56,6 +59,8 @@ export default function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastSeq = useRef(0);
   const streamBuf = useRef({ text: "", last: 0, timer: 0 });
+  // true while the current run renders in the popup window instead of this one
+  const popupTarget = useRef(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const toast = useCallback((text: string, tone: "default" | "error" = "default") => {
@@ -90,6 +95,9 @@ export default function App() {
 
     reg(
       onTranslationStart((payload) => {
+        // The popup window owns this run; the shell must not mirror it.
+        popupTarget.current = payload.target === "popup";
+        if (popupTarget.current) return;
         streamBuf.current = { text: "", last: 0, timer: 0 };
         setStream({
           id: payload.id,
@@ -106,6 +114,7 @@ export default function App() {
 
     reg(
       onTranslationChunk((delta) => {
+        if (popupTarget.current) return;
         const buf = streamBuf.current;
         buf.text += delta;
         const flush = () => setStream((s) => (s ? { ...s, text: buf.text } : s));
@@ -127,6 +136,12 @@ export default function App() {
     reg(
       onTranslationDone(async (id, cancelled) => {
         window.clearTimeout(streamBuf.current.timer);
+        if (popupTarget.current) {
+          // keep the archive in sync, but leave the visible window alone
+          await refresh(false);
+          setStatus("idle");
+          return;
+        }
         setStream(null);
         await refresh(false);
         setCurrentId(id);
@@ -138,10 +153,23 @@ export default function App() {
 
     reg(
       onTranslationError((message) => {
+        if (popupTarget.current) {
+          setStatus("idle");
+          return;
+        }
         window.clearTimeout(streamBuf.current.timer);
         setStream(null);
         setStatus("idle");
         toast(message, "error");
+      }),
+    );
+
+    reg(
+      onEntryOpen(async (id) => {
+        await refresh(false);
+        setCurrentId(id);
+        setTab("translate");
+        setStatus("idle");
       }),
     );
 
@@ -204,6 +232,18 @@ export default function App() {
     } finally {
       setStatus("idle");
     }
+  }
+
+  async function handleDeleteMany(ids: string[]) {
+    await deleteEntries(ids);
+    const list = await refresh(false);
+    if (currentId && ids.includes(currentId)) setCurrentId(list[0]?.id ?? null);
+  }
+
+  async function handleClearAll() {
+    await clearEntries();
+    await refresh(false);
+    setCurrentId(null);
   }
 
   async function handleDelete(id: string) {
@@ -368,7 +408,13 @@ export default function App() {
           ) : null}
 
           {tab === "archive" ? (
-            <Archive entries={entries} onDelete={handleDelete} />
+            <Archive
+              entries={entries}
+              onDelete={handleDelete}
+              onDeleteMany={handleDeleteMany}
+              onClear={handleClearAll}
+              toast={toast}
+            />
           ) : null}
 
           {tab === "settings" ? (

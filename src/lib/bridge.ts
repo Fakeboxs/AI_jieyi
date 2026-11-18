@@ -100,6 +100,52 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
+/** Bulk delete + wipe, used by the archive toolbar. */
+export async function deleteEntries(ids: string[]): Promise<number> {
+  if (!inTauri) return ids.length;
+  return call<number>("delete_entries", { ids });
+}
+
+export async function clearEntries(): Promise<number> {
+  if (!inTauri) return 0;
+  return call<number>("clear_entries");
+}
+
+export async function hidePopup(): Promise<void> {
+  if (!inTauri) return;
+  await call<void>("hide_popup");
+}
+
+export async function openInMain(id: string): Promise<void> {
+  if (!inTauri) return;
+  await call<void>("open_in_main", { id });
+}
+
+export interface RunSnapshot {
+  id: string;
+  provider: string;
+  model: string;
+  stream: boolean;
+  image_count: number;
+  target: string;
+  text: string;
+  done: boolean;
+  started_ms: number;
+}
+
+/** Popup: pull whatever already happened before this window mounted. */
+export async function runSnapshot(): Promise<RunSnapshot | null> {
+  if (!inTauri) return null;
+  return call<RunSnapshot>("run_snapshot");
+}
+
+/** Main window: a popup asked to show this entry. */
+export async function onEntryOpen(cb: (id: string) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<{ id: string }>("entry:open", (e) => cb(e.payload.id));
+}
+
 export async function onTranslationDone(
   cb: (entryId: string, cancelled: boolean) => void,
 ): Promise<() => void> {

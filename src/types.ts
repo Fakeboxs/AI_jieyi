@@ -40,6 +40,8 @@ export interface Config {
   capture_screen: number;
   /** 再次截图时预选上次的框选区域 */
   remember_region: boolean;
+  /** "popup" = 选区旁的独立小窗；"main" = 回到主窗口 */
+  result_window: "popup" | "main";
   advanced: AdvancedConfig;
 }
 
@@ -49,6 +51,8 @@ export interface TranslationStart {
   model: string;
   stream: boolean;
   image_count: number;
+  /** 这次结果该显示在哪里 */
+  target?: "popup" | "main";
 }
 
 export interface ShotReady {

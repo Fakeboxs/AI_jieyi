@@ -392,6 +392,28 @@ export function Settings({
           />
           记住上次框选区域（下次打开选区时自动预选，可拖动调整）
         </label>
+        <div className="field">
+          <label>翻译结果显示在</label>
+          <div className="segmented" role="group" aria-label="结果显示位置">
+            {(
+              [
+                ["popup", "选区旁的独立小窗"],
+                ["main", "主窗口"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                aria-pressed={draft.result_window === value}
+                onClick={() => patch({ result_window: value })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="hint">
+            独立小窗是窄边、置顶的浮窗，出现在选区旁边，不会把主窗口拉到前台；按 Esc 或右上角 × 可关闭。
+          </span>
+        </div>
         <div className="hint-strip">
           <span>重复上次区域（不弹选区，直接翻译）</span>
           <span className="kbd">
