@@ -1,0 +1,14 @@
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.bmp binary
+*.exe binary
+*.zip binary
+
+*.rs text
+*.ts text
+*.tsx text
+*.css text
+*.md text
+*.json text

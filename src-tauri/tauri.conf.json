@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "截译",
+  "version": "0.1.0",
+  "identifier": "app.jieyi.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "截译",
+        "width": 1120,
+        "height": 780,
+        "minWidth": 940,
+        "minHeight": 620,
+        "center": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "JieYi",
+    "copyright": "Copyright © 2026 JieYi contributors",
+    "category": "Productivity",
+    "shortDescription": "截图即译：框选屏幕任意区域，AI 翻译成中文，保留公式与表格",
+    "longDescription": "截译把「截图 → 视觉模型翻译 → 排版还原」做成一次快捷键操作：Ctrl+Alt+S 框选，译文带着 LaTeX 公式、表格与代码块出现，可一键复制并自动归档。支持 OpenAI 兼容、Anthropic、Gemini 与自定义端点，流式/直出可选，无任何遥测。",
+    "licenseFile": "../LICENSE",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["SimpChinese", "English"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "sidebarImage": "icons/sidebar.bmp",
+        "headerImage": "icons/header.bmp",
+        "compression": "lzma",
+        "startMenuFolder": "截译"
+      }
+    }
+  }
+}

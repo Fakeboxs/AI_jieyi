@@ -1,0 +1,37 @@
+[package]
+name = "jieyi"
+version = "0.1.0"
+description = "截译 — 截图即译"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "jieyi_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.23.1"
+chrono = "0.4.45"
+futures-util = "0.3.34"
+image = { version = "0.25.6", features = ["png"] }
+reqwest = { version = "0.13.3", features = ["json", "stream"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-global-shortcut = "2"
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+uuid = { version = "1.20.0", features = ["v4"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+xcap = "0.9.10"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
