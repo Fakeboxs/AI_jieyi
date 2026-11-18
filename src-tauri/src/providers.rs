@@ -1,11 +1,15 @@
-use crate::config::Config;
+use crate::config::{Advanced, Config};
 use futures_util::StreamExt;
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 pub struct Translation {
     pub text: String,
     pub elapsed_ms: u64,
+    /// true when the user stopped the stream early
+    pub cancelled: bool,
 }
 
 fn join_parts(parts: &Value) -> Option<String> {
@@ -19,25 +23,61 @@ fn join_parts(parts: &Value) -> Option<String> {
     (!out.trim().is_empty()).then_some(out)
 }
 
-fn parse_response(provider: &str, body: &Value) -> Result<String, String> {
-    match provider {
+fn short(v: &Value) -> String {
+    let s = v.to_string();
+    if s.len() > 360 {
+        format!("{}…", &s[..360])
+    } else {
+        s
+    }
+}
+
+fn parse_response(cfg: &Config, body: &Value) -> Result<String, String> {
+    match cfg.provider.as_str() {
         "anthropic" => join_parts(body.get("content").unwrap_or(&Value::Null))
             .ok_or_else(|| format!("响应里没有文本内容：{}", short(body))),
         "gemini" => body
             .pointer("/candidates/0/content/parts")
             .and_then(join_parts)
             .ok_or_else(|| format!("响应里没有文本内容：{}", short(body))),
-        _ => {
-            let msg = body.pointer("/choices/0/message/content");
-            match msg {
-                Some(Value::String(s)) => Ok(s.clone()),
-                Some(other) => {
-                    join_parts(other).ok_or_else(|| format!("响应里没有文本内容：{}", short(body)))
-                }
-                None => Err(format!("响应里没有 choices：{}", short(body))),
+        "advanced" => parse_advanced(&cfg.advanced, body),
+        _ => match body.pointer("/choices/0/message/content") {
+            Some(Value::String(s)) => Ok(s.clone()),
+            Some(other) => {
+                join_parts(other).ok_or_else(|| format!("响应里没有文本内容：{}", short(other)))
             }
-        }
+            None => Err(format!("响应里没有 choices：{}", short(body))),
+        },
     }
+}
+
+fn parse_advanced(a: &Advanced, body: &Value) -> Result<String, String> {
+    let path = a.response_path.trim();
+    if !path.is_empty() {
+        let hit = body
+            .pointer(path)
+            .ok_or_else(|| format!("response_path `{path}` 没有命中：{}", short(body)))?;
+        return match hit {
+            Value::String(s) => Ok(s.clone()),
+            other => join_parts(other)
+                .or_else(|| other.as_str().map(str::to_string))
+                .ok_or_else(|| format!("`{path}` 命中的内容不是文本：{}", short(other))),
+        };
+    }
+    // No explicit path: try the shapes we know, in order.
+    if let Some(Value::String(s)) = body.pointer("/choices/0/message/content") {
+        return Ok(s.clone());
+    }
+    if let Some(text) = body.get("content").and_then(join_parts) {
+        return Ok(text);
+    }
+    if let Some(text) = body.pointer("/candidates/0/content/parts").and_then(join_parts) {
+        return Ok(text);
+    }
+    Err(format!(
+        "没能在响应里找到文本，请设置 response_path：{}",
+        short(body)
+    ))
 }
 
 /// Pull the incremental text out of one SSE `data:` payload.
@@ -56,15 +96,6 @@ fn delta_text(provider: &str, v: &Value) -> Option<String> {
     }
 }
 
-fn short(v: &Value) -> String {
-    let s = v.to_string();
-    if s.len() > 360 {
-        format!("{}…", &s[..360])
-    } else {
-        s
-    }
-}
-
 fn api_error(status: reqwest::StatusCode, body: &str) -> String {
     let detail = serde_json::from_str::<Value>(body)
         .ok()
@@ -77,13 +108,63 @@ fn api_error(status: reqwest::StatusCode, body: &str) -> String {
     format!("HTTP {} · {}", status.as_u16(), detail)
 }
 
+/// Substitute `{{…}}` placeholders inside an advanced-template string.
+fn render_template(tpl: &str, cfg: &Config, images_b64: &[String], stream: bool) -> String {
+    let data_urls: Vec<String> = images_b64
+        .iter()
+        .map(|b| format!("data:image/png;base64,{b}"))
+        .collect();
+    let images_json = serde_json::to_string(&data_urls).unwrap_or_else(|_| "[]".to_string());
+    // OpenAI-style content parts, already comma-joined WITHOUT the outer array
+    // brackets: templates splice them straight into their own `content: [ … ]`.
+    let parts_json = data_urls
+        .iter()
+        .map(|u| {
+            json!({ "type": "image_url", "image_url": { "url": u } }).to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let prompt_json = serde_json::to_string(&cfg.prompt).unwrap_or_else(|_| "\"\"".to_string());
+    let model = cfg.model();
+    let model_json = serde_json::to_string(&model).unwrap_or_else(|_| "\"\"".to_string());
+
+    tpl.replace("{{api_key}}", cfg.api_key.trim())
+        .replace("{{model_json}}", &model_json)
+        .replace("{{model}}", &model)
+        .replace("{{prompt_json}}", &prompt_json)
+        .replace("{{prompt}}", &cfg.prompt)
+        .replace("{{max_tokens}}", &cfg.max_tokens.to_string())
+        .replace("{{temperature}}", &cfg.temperature.to_string())
+        .replace("{{stream}}", if stream { "true" } else { "false" })
+        .replace("{{image_count}}", &images_b64.len().to_string())
+        .replace("{{image_data}}", images_b64.first().map(String::as_str).unwrap_or(""))
+        .replace("{{image_parts}}", &parts_json)
+        .replace("{{images}}", &images_json)
+}
+
+/// Used when the user opens the advanced template without editing it.
+pub const ADVANCED_BODY_EXAMPLE: &str = r#"{
+  "model": {{model_json}},
+  "max_tokens": {{max_tokens}},
+  "temperature": {{temperature}},
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {{image_parts}},
+        { "type": "text", "text": {{prompt_json}} }
+      ]
+    }
+  ]
+}"#;
+
 fn build_request(
     client: &reqwest::Client,
     cfg: &Config,
     images_b64: &[String],
     stream: bool,
 ) -> Result<reqwest::RequestBuilder, String> {
-    if cfg.api_key.trim().is_empty() {
+    if cfg.provider != "advanced" && cfg.api_key.trim().is_empty() {
         return Err("还没有填写 API Key（设置 → 模型服务）".into());
     }
     let base = cfg.trimmed_base();
@@ -146,6 +227,35 @@ fn build_request(
                 }
             }))
         }
+        "advanced" => {
+            let a = &cfg.advanced;
+            if a.endpoint.trim().is_empty() {
+                return Err("高级模板还没填 endpoint（设置 → 高级 API）".into());
+            }
+            let url = render_template(a.endpoint.trim(), cfg, images_b64, stream);
+            let body_tpl = if a.body.trim().is_empty() {
+                ADVANCED_BODY_EXAMPLE.to_string()
+            } else {
+                a.body.clone()
+            };
+            let rendered = render_template(&body_tpl, cfg, images_b64, stream);
+            let mut body: Value = serde_json::from_str(&rendered)
+                .map_err(|e| format!("模板渲染后的请求体不是合法 JSON：{e}"))?;
+            // Streaming is decided by the app, not by the template: inject it only
+            // when the author did not write a `stream` field themselves.
+            if stream && body.get("stream").is_none() {
+                body["stream"] = json!(true);
+            }
+
+            let mut req = client.post(url).header("content-type", "application/json");
+            for h in &a.headers {
+                if h.key.trim().is_empty() {
+                    continue;
+                }
+                req = req.header(h.key.trim(), render_template(&h.value, cfg, images_b64, stream));
+            }
+            req.json(&body)
+        }
         _ => {
             let url = format!("{base}/chat/completions");
             let mut content: Vec<Value> = images_b64
@@ -196,18 +306,21 @@ pub async fn translate(
     if let Some(err) = body.pointer("/error/message").and_then(|v| v.as_str()) {
         return Err(err.to_string());
     }
-    let text = parse_response(&cfg.provider, &body)?;
+    let text = parse_response(cfg, &body)?;
     Ok(Translation {
         text: text.trim().to_string(),
         elapsed_ms: started.elapsed().as_millis() as u64,
+        cancelled: false,
     })
 }
 
-/// SSE request: every delta is pushed through `on_delta`, the full text is returned at the end.
+/// SSE request: every delta is pushed through `on_delta`. `cancel` lets the user
+/// stop mid-generation — whatever already arrived is kept.
 pub async fn translate_stream<F: FnMut(&str)>(
     client: &reqwest::Client,
     cfg: &Config,
     images_b64: &[String],
+    cancel: Arc<AtomicBool>,
     mut on_delta: F,
 ) -> Result<Translation, String> {
     let started = Instant::now();
@@ -225,8 +338,13 @@ pub async fn translate_stream<F: FnMut(&str)>(
     let mut stream = resp.bytes_stream();
     let mut buf = String::new();
     let mut out = String::new();
+    let mut cancelled = false;
 
-    while let Some(chunk) = stream.next().await {
+    'read: while let Some(chunk) = stream.next().await {
+        if cancel.load(Ordering::Relaxed) {
+            cancelled = true;
+            break;
+        }
         let chunk = chunk.map_err(|e| format!("读取流失败：{e}"))?;
         buf.push_str(&String::from_utf8_lossy(&chunk).replace("\r\n", "\n"));
 
@@ -254,6 +372,10 @@ pub async fn translate_stream<F: FnMut(&str)>(
                         on_delta(&delta);
                     }
                 }
+                if cancel.load(Ordering::Relaxed) {
+                    cancelled = true;
+                    break 'read;
+                }
             }
         }
     }
@@ -264,11 +386,15 @@ pub async fn translate_stream<F: FnMut(&str)>(
     Ok(Translation {
         text: out.trim().to_string(),
         elapsed_ms: started.elapsed().as_millis() as u64,
+        cancelled,
     })
 }
 
 /// Lightweight reachability probe: GET /models where the API exposes one.
 pub async fn probe(client: &reqwest::Client, cfg: &Config) -> Result<String, String> {
+    if cfg.provider == "advanced" {
+        return Ok("高级模板不做连接探测，直接截图试翻一次即可".into());
+    }
     if cfg.api_key.trim().is_empty() {
         return Err("还没有填写 API Key".into());
     }

@@ -1,4 +1,4 @@
-import type { Config, Entry, ShotReady, TranslationStart } from "../types";
+import type { Config, Entry, MonitorInfo, Rect, ShotReady, TranslationStart } from "../types";
 import { MOCK_CONFIG, MOCK_ENTRIES, mockDelay, mockTranslate } from "./mock";
 
 export const inTauri =
@@ -100,10 +100,14 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export async function onTranslationDone(cb: (entryId: string) => void): Promise<() => void> {
+export async function onTranslationDone(
+  cb: (entryId: string, cancelled: boolean) => void,
+): Promise<() => void> {
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
-  const un = await listen<{ id: string }>("translation:done", (e) => cb(e.payload.id));
+  const un = await listen<{ id: string; cancelled?: boolean }>("translation:done", (e) =>
+    cb(e.payload.id, Boolean(e.payload.cancelled)),
+  );
   return un;
 }
 
@@ -133,6 +137,7 @@ export interface ShotInfo {
   width: number;
   height: number;
   scale: number;
+  last_region: [number, number, number, number] | null;
 }
 
 /** Overlay pulls the frozen screenshot once it mounts (no event race). */
@@ -148,10 +153,44 @@ export async function onShotReady(cb: (shot: ShotReady) => void): Promise<() => 
   return un;
 }
 
-/** Overlay → backend: user finished dragging. */
-export async function translateRegion(rect: { x: number; y: number; w: number; h: number }) {
+/** Overlay → backend: translate one or more selected regions together. */
+export async function translateRegions(rects: Rect[]) {
   if (!inTauri) return;
-  await call<void>("translate_region", rect);
+  await call<void>("translate_regions", { rects });
+}
+
+/** Stop the running stream; whatever already arrived is kept. */
+export async function cancelTranslation() {
+  if (!inTauri) return;
+  await call<void>("cancel_translation");
+}
+
+export async function listMonitors(): Promise<MonitorInfo[]> {
+  if (!inTauri) {
+    return [{ index: 0, name: "显示器 1（预览）", width: 1920, height: 1080, x: 0, y: 0, scale: 1, primary: true }];
+  }
+  return call<MonitorInfo[]>("list_monitors");
+}
+
+/** Ask for a path, then let Rust write the markdown. Returns the saved path. */
+export async function exportMarkdown(
+  id: string,
+  suggestedName: string,
+  markdown: string,
+): Promise<string | null> {
+  if (!inTauri) {
+    const { downloadText } = await import("./download");
+    downloadText(suggestedName, markdown);
+    return null;
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const path = await save({
+    defaultPath: suggestedName,
+    filters: [{ name: "Markdown", extensions: ["md"] }],
+  });
+  if (!path) return null;
+  await call<void>("export_markdown", { id, path });
+  return path;
 }
 
 export async function cancelOverlay() {

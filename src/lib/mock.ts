@@ -19,6 +19,9 @@ export const MOCK_CONFIG: Config = {
   temperature: 0.2,
   theme: "system",
   stream: true,
+  capture_screen: -1,
+  remember_region: true,
+  advanced: { endpoint: "", headers: [], body: "", response_path: "" },
 };
 
 const now = Date.now();

@@ -19,6 +19,8 @@ import {
   onTranslationError,
   onTranslationStart,
   retranslate,
+  cancelTranslation,
+  exportMarkdown,
   saveConfig,
   startCapture,
   testConnection,
@@ -49,6 +51,7 @@ export default function App() {
     provider: string;
     model: string;
     progressive: boolean;
+    imageCount: number;
   } | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastSeq = useRef(0);
@@ -94,6 +97,7 @@ export default function App() {
           provider: payload.provider,
           model: payload.model,
           progressive: payload.stream,
+          imageCount: payload.image_count ?? 1,
         });
         setStatus("translating");
         setTab("translate");
@@ -121,13 +125,14 @@ export default function App() {
     );
 
     reg(
-      onTranslationDone(async (id) => {
+      onTranslationDone(async (id, cancelled) => {
         window.clearTimeout(streamBuf.current.timer);
         setStream(null);
         await refresh(false);
         setCurrentId(id);
         setTab("translate");
         setStatus("idle");
+        if (cancelled) toast("已停止生成，保留了已生成的部分");
       }),
     );
 
@@ -222,6 +227,22 @@ export default function App() {
     }
   }
 
+  async function handleExport(entry: Entry) {
+    const stamp = entry.timestamp.slice(0, 10);
+    const name = `截译-${stamp}-${entry.id.slice(0, 6)}.md`;
+    try {
+      const path = await exportMarkdown(entry.id, name, entry.markdown);
+      toast(path ? `已导出到 ${path}` : "已导出");
+    } catch (e) {
+      toast(`导出失败：${String(e)}`, "error");
+    }
+  }
+
+  async function handleUpdateTags(id: string, tags: string[]) {
+    await updateTags(id, tags);
+    await refresh(false);
+  }
+
   async function handleSave(c: Config) {
     const saved = await saveConfig(c);
     setConfig(saved);
@@ -307,6 +328,8 @@ export default function App() {
                 provider={stream.provider}
                 model={stream.model}
                 progressive={stream.progressive}
+                imageCount={stream.imageCount}
+                onStop={() => void cancelTranslation()}
                 toast={toast}
               />
             ) : busy ? (
@@ -316,6 +339,8 @@ export default function App() {
                 entry={current}
                 onDelete={handleDelete}
                 onRetranslate={handleRetranslate}
+                onUpdateTags={handleUpdateTags}
+                onExport={handleExport}
                 toast={toast}
                 busy={busy}
               />

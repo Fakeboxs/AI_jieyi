@@ -3,6 +3,25 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_PROMPT: &str = "# 角色\n你是专业的学术翻译，擅长中英互译，并能精确处理数学、物理等领域的 LaTeX 公式。\n\n# 任务\n把图片中的英文内容翻译为中文。\n\n# 要求\n1. 只输出译文，不要开场白、解释或结束语。\n2. 数学变量、常数、公式必须使用 LaTeX（$x$ 或 $$E=mc^2$$）。\n3. 术语严谨，保持原文段落结构。\n4. Markdown 可用于标题、列表与表格。";
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct HeaderKV {
+    pub key: String,
+    pub value: String,
+}
+
+/// Fully user-defined HTTP call: endpoint / headers / body are templates with
+/// `{{model}}`, `{{prompt_json}}`, `{{images}}` … placeholders.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Advanced {
+    pub endpoint: String,
+    pub headers: Vec<HeaderKV>,
+    pub body: String,
+    /// Optional JSON pointer into the response, e.g. `/data/0/content`.
+    pub response_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -16,6 +35,11 @@ pub struct Config {
     pub theme: String,
     /// true = SSE 流式增量返回；false = 等模型一次性返回（直出）
     pub stream: bool,
+    /// -1 = 鼠标所在显示器；0..n = 指定显示器序号
+    pub capture_screen: i32,
+    /// 再次截图时预选上次的框选区域
+    pub remember_region: bool,
+    pub advanced: Advanced,
 }
 
 impl Default for Config {
@@ -30,6 +54,9 @@ impl Default for Config {
             temperature: 0.2,
             theme: "system".into(),
             stream: true,
+            capture_screen: -1,
+            remember_region: true,
+            advanced: Advanced::default(),
         }
     }
 }

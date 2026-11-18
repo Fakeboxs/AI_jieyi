@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, Info, Moon, Plug, Save, Sun, Monitor } from "lucide-react";
 import type { Config, Provider } from "../types";
+import { listMonitors } from "../lib/bridge";
 import { Section } from "./ui";
 
 const PRESETS: Record<Provider, { label: string; base: string; model: string; hint: string }> = {
@@ -28,7 +29,28 @@ const PRESETS: Record<Provider, { label: string; base: string; model: string; hi
     model: "local-vlm",
     hint: "自定义端点按 OpenAI 兼容格式发送，适合自建服务或反向代理。",
   },
+  advanced: {
+    label: "高级模板",
+    base: "",
+    model: "",
+    hint: "自己写 endpoint / headers / body，用 {{model}}、{{prompt_json}}、{{images}} 等占位符拼装请求。",
+  },
 };
+
+const ADVANCED_BODY_EXAMPLE = `{
+  "model": {{model_json}},
+  "max_tokens": {{max_tokens}},
+  "temperature": {{temperature}},
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {{image_parts}},
+        { "type": "text", "text": {{prompt_json}} }
+      ]
+    }
+  ]
+}`;
 
 export function Settings({
   config,
@@ -45,11 +67,18 @@ export function Settings({
 }) {
   const [draft, setDraft] = useState<Config>(config);
   const [showKey, setShowKey] = useState(false);
+  const [monitors, setMonitors] = useState<{ index: number; name: string; width: number; height: number }[]>([]);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => setDraft(config), [config]);
+
+  useEffect(() => {
+    listMonitors()
+      .then((list) => setMonitors(list))
+      .catch(() => setMonitors([]));
+  }, []);
 
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(config), [draft, config]);
 
@@ -164,6 +193,124 @@ export function Settings({
         </div>
       </Section>
 
+      {draft.provider === "advanced" ? (
+        <Section
+          title="高级 API 模板"
+          desc="占位符：{{api_key}} {{model}} {{model_json}} {{prompt}} {{prompt_json}} {{max_tokens}} {{temperature}} {{stream}} {{image_parts}} {{images}} {{image_data}} {{image_count}}"
+          actions={
+            <button
+              className="btn btn-ghost"
+              onClick={() =>
+                patch({ advanced: { ...draft.advanced, body: ADVANCED_BODY_EXAMPLE } })
+              }
+            >
+              填入示例
+            </button>
+          }
+        >
+          <div className="field">
+            <label htmlFor="adv-endpoint">Endpoint</label>
+            <input
+              id="adv-endpoint"
+              className="input"
+              value={draft.advanced.endpoint}
+              onChange={(e) => patch({ advanced: { ...draft.advanced, endpoint: e.target.value } })}
+              placeholder="https://api.example.com/v1/chat/completions"
+              spellCheck={false}
+            />
+            <span className="hint">可以带占位符，例如 https://host/v1/models/{"{{model}}"}:generate</span>
+          </div>
+
+          <div className="field">
+            <label>Headers</label>
+            {draft.advanced.headers.map((h, i) => (
+              <div className="kv-row" key={i}>
+                <input
+                  className="input"
+                  value={h.key}
+                  placeholder="Authorization"
+                  spellCheck={false}
+                  onChange={(e) => {
+                    const headers = [...draft.advanced.headers];
+                    headers[i] = { ...h, key: e.target.value };
+                    patch({ advanced: { ...draft.advanced, headers } });
+                  }}
+                />
+                <input
+                  className="input"
+                  value={h.value}
+                  placeholder="Bearer {'{{api_key}}'}"
+                  spellCheck={false}
+                  onChange={(e) => {
+                    const headers = [...draft.advanced.headers];
+                    headers[i] = { ...h, value: e.target.value };
+                    patch({ advanced: { ...draft.advanced, headers } });
+                  }}
+                />
+                <button
+                  className="btn btn-ghost btn-icon"
+                  aria-label="删除该 Header"
+                  onClick={() =>
+                    patch({
+                      advanced: {
+                        ...draft.advanced,
+                        headers: draft.advanced.headers.filter((_, j) => j !== i),
+                      },
+                    })
+                  }
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              className="btn btn-soft"
+              style={{ width: "fit-content" }}
+              onClick={() =>
+                patch({
+                  advanced: {
+                    ...draft.advanced,
+                    headers: [...draft.advanced.headers, { key: "", value: "" }],
+                  },
+                })
+              }
+            >
+              + 添加 Header
+            </button>
+          </div>
+
+          <div className="field">
+            <label htmlFor="adv-body">请求体（JSON 模板）</label>
+            <textarea
+              id="adv-body"
+              className="textarea"
+              style={{ minHeight: 200 }}
+              value={draft.advanced.body}
+              placeholder={ADVANCED_BODY_EXAMPLE}
+              spellCheck={false}
+              onChange={(e) => patch({ advanced: { ...draft.advanced, body: e.target.value } })}
+            />
+            <span className="hint">
+              {"{{image_parts}}"} 会展开成多个 image_url part（不含外层 [ ]），直接写在 content 数组里即可；
+              {"{{images}}"} 则是图片 data URL 的数组。
+            </span>
+          </div>
+
+          <div className="field">
+            <label htmlFor="adv-resp">响应字段（JSON Pointer，可选）</label>
+            <input
+              id="adv-resp"
+              className="input"
+              value={draft.advanced.response_path}
+              onChange={(e) => patch({ advanced: { ...draft.advanced, response_path: e.target.value } })}
+              placeholder="/choices/0/message/content"
+              spellCheck={false}
+            />
+            <span className="hint">留空时自动尝试 OpenAI / Anthropic / Gemini 的常见结构。</span>
+          </div>
+        </Section>
+      ) : null}
+
       <Section title="翻译偏好" desc="提示词决定了译文风格、是否保留公式与段落结构">
         <div className="field">
           <label>输出方式</label>
@@ -217,6 +364,41 @@ export function Settings({
               onChange={(e) => patch({ temperature: Number(e.target.value) })}
             />
           </div>
+        </div>
+      </Section>
+
+      <Section title="截图" desc="决定热键截取哪块屏幕，以及是否记住上次的框选">
+        <div className="field">
+          <label htmlFor="capture-screen">捕获屏幕</label>
+          <select
+            id="capture-screen"
+            className="select"
+            value={draft.capture_screen}
+            onChange={(e) => patch({ capture_screen: Number(e.target.value) })}
+          >
+            <option value={-1}>跟随鼠标所在屏幕</option>
+            {monitors.map((m) => (
+              <option key={m.index} value={m.index}>
+                {m.name} · {m.width}×{m.height}
+              </option>
+            ))}
+          </select>
+        </div>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={draft.remember_region}
+            onChange={(e) => patch({ remember_region: e.target.checked })}
+          />
+          记住上次框选区域（下次打开选区时自动预选，可拖动调整）
+        </label>
+        <div className="hint-strip">
+          <span>重复上次区域（不弹选区，直接翻译）</span>
+          <span className="kbd">
+            <kbd>Ctrl</kbd>
+            <kbd>Alt</kbd>
+            <kbd>D</kbd>
+          </span>
         </div>
       </Section>
 

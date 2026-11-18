@@ -1,21 +1,18 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { cancelOverlay, getShot, inTauri, translateRegion } from "./lib/bridge";
+import { cancelOverlay, getShot, inTauri, translateRegions } from "./lib/bridge";
+import type { Rect } from "./types";
 import "./styles/app.css";
-
-interface Rect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
 
 const DEMO = new URLSearchParams(window.location.search).has("demo");
 
 export default function Overlay() {
-  const [shot, setShot] = useState<{ width: number; height: number } | null>(null);
-  const [src, setSrc] = useState<string>("");
-  const [rect, setRect] = useState<Rect | null>(null);
+  const [src, setSrc] = useState("");
+  const [shotSize, setShotSize] = useState<{ width: number; height: number } | null>(null);
+  const [regions, setRegions] = useState<Rect[]>([]);
+  // true while the only region is the remembered one from the last capture
+  const [ghost, setGhost] = useState(false);
+  const [draft, setDraft] = useState<Rect | null>(null);
   const [busy, setBusy] = useState(false);
   const start = useRef<{ x: number; y: number } | null>(null);
   const [vw, setVw] = useState(window.innerWidth);
@@ -30,14 +27,52 @@ export default function Overlay() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // Drag state must never re-trigger the screenshot load: reading the frozen
+  // frame again on every pointermove stalls the webview. Refs keep the keyboard
+  // handler stable while still seeing the latest drag.
+  const draftRef = useRef<Rect | null>(null);
+  const regionsRef = useRef<Rect[]>([]);
+  const busyRef = useRef(false);
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+  useEffect(() => {
+    regionsRef.current = regions;
+  }, [regions]);
+
+  const submit = useCallback(async (all: Rect[]) => {
+    if (!all.length || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      if (inTauri) {
+        await translateRegions(all);
+      } else {
+        await new Promise((r) => setTimeout(r, 600));
+        busyRef.current = false;
+        setBusy(false);
+      }
+    } catch {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       const s = await getShot();
-      setRect(null);
+      busyRef.current = false;
+      setDraft(null);
       setBusy(false);
       if (s) {
         setSrc(s.data_url);
-        setShot({ width: s.width, height: s.height });
+        setShotSize({ width: s.width, height: s.height });
+        // pre-select the previous rectangle on this monitor
+        const prev = s.last_region;
+        setRegions(
+          prev ? [{ x: prev[0], y: prev[1], w: prev[2], h: prev[3] }] : [],
+        );
+        setGhost(Boolean(prev));
       }
     };
     void load();
@@ -48,72 +83,87 @@ export default function Overlay() {
         .then(({ listen }) => listen("shot:refresh", () => void load()))
         .then((fn) => (offRefresh = fn));
     }
+    return () => offRefresh();
+  }, []);
 
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         void cancelOverlay();
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const d = draftRef.current;
+        const all = d ? [...regionsRef.current, d] : regionsRef.current;
+        if (!all.length) return;
+        setDraft(null);
+        setRegions(all);
+        void submit(all);
+      } else if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        setRegions((cur) => cur.slice(0, -1));
       }
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      offRefresh();
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [submit]);
 
   function clamp(v: number, max: number) {
     return Math.max(0, Math.min(v, max));
   }
 
+  // Track the drag on window so it survives fast pointer moves and focus quirks
+  // inside the WebView2 overlay (element-level capture is unreliable there).
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const s = start.current;
+      if (!s) return;
+      e.preventDefault();
+      const x = clamp(Math.min(s.x, e.clientX), window.innerWidth);
+      const y = clamp(Math.min(s.y, e.clientY), window.innerHeight);
+      const w = Math.min(Math.abs(e.clientX - s.x), window.innerWidth - x);
+      const h = Math.min(Math.abs(e.clientY - s.y), window.innerHeight - y);
+      setDraft({ x, y, w, h });
+    };
+    const up = () => {
+      if (!start.current) return;
+      start.current = null;
+      setDraft((d) => {
+        if (!d) return null;
+        if (d.w < 8 || d.h < 8) return null;
+        // each drag adds a region; Enter sends them all
+        setRegions((cur) => [...cur, d]);
+        return null;
+      });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, []);
+
   function onPointerDown(e: React.PointerEvent) {
-    if (busy) return;
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    if (busy || e.button !== 0) return;
+    // A new drag replaces the remembered rectangle instead of stacking on it.
+    if (ghost) {
+      setRegions([]);
+      setGhost(false);
+    }
     start.current = { x: e.clientX, y: e.clientY };
-    setRect({ x: e.clientX, y: e.clientY, w: 0, h: 0 });
+    setDraft({ x: e.clientX, y: e.clientY, w: 0, h: 0 });
   }
 
-  function onPointerMove(e: React.PointerEvent) {
-    const s = start.current;
-    if (!s) return;
-    const x = clamp(Math.min(s.x, e.clientX), vw);
-    const y = clamp(Math.min(s.y, e.clientY), vh);
-    const w = Math.min(Math.abs(e.clientX - s.x), vw - x);
-    const h = Math.min(Math.abs(e.clientY - s.y), vh - y);
-    setRect({ x, y, w, h });
-  }
-
-  async function onPointerUp() {
-    const s = start.current;
-    start.current = null;
-    if (!s || !rect) return;
-    if (rect.w < 8 || rect.h < 8) {
-      setRect(null);
-      return;
-    }
-    setBusy(true);
-    try {
-      if (inTauri) {
-        await translateRegion({ x: rect.x, y: rect.y, w: rect.w, h: rect.h });
-      } else {
-        await new Promise((r) => setTimeout(r, 600));
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const maskTop = rect ? { top: 0, left: 0, width: "100%", height: rect.y } : null;
-  const maskBottom = rect ? { top: rect.y + rect.h, left: 0, width: "100%", height: Math.max(0, vh - rect.y - rect.h) } : null;
-  const maskLeft = rect ? { top: rect.y, left: 0, width: rect.x, height: rect.h } : null;
-  const maskRight = rect ? { top: rect.y, left: rect.x + rect.w, width: Math.max(0, vw - rect.x - rect.w), height: rect.h } : null;
+  const all: Rect[] = draft ? [...regions, draft] : regions;
 
   return (
     <div
       className="overlay-root"
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
+      onDoubleClick={() => void submit(regions)}
     >
       {src ? (
         <img className="overlay-shot" src={src} alt="" draggable={false} />
@@ -128,43 +178,60 @@ export default function Overlay() {
         </div>
       )}
 
-      {rect ? (
-        <>
-          {maskTop ? <div className="overlay-mask" style={maskTop} /> : null}
-          {maskBottom ? <div className="overlay-mask" style={maskBottom} /> : null}
-          {maskLeft ? <div className="overlay-mask" style={maskLeft} /> : null}
-          {maskRight ? <div className="overlay-mask" style={maskRight} /> : null}
-          <div
-            className="overlay-sel"
-            data-size={`${Math.round(rect.w)} × ${Math.round(rect.h)}`}
-            style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
-          />
-        </>
-      ) : (
-        <div className="overlay-mask" style={{ inset: 0 }} />
-      )}
+      <svg className="overlay-mask-svg" width={vw} height={vh} aria-hidden>
+        <defs>
+          <mask id="cut">
+            <rect x={0} y={0} width={vw} height={vh} fill="white" />
+            {all.map((r, i) => (
+              <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} fill="black" />
+            ))}
+          </mask>
+        </defs>
+        <rect x={0} y={0} width={vw} height={vh} fill="rgba(3,16,18,0.55)" mask="url(#cut)" />
+      </svg>
+
+      {all.map((r, i) => (
+        <div
+          key={i}
+          className={[
+            "overlay-sel",
+            i === all.length - 1 && draft ? "is-draft" : "",
+            ghost && !draft ? "is-ghost" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          data-size={`${Math.round(r.w)} × ${Math.round(r.h)}`}
+          style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
+        >
+          <span className="overlay-idx">{i + 1}</span>
+        </div>
+      ))}
 
       <div className="overlay-tips">
         {busy ? (
           <>
             <span className="spinner" />
-            正在翻译选中的区域…
+            正在翻译选中的 {regions.length} 块区域…
           </>
         ) : (
           <>
-            <span>拖动框选要翻译的区域</span>
+            <span>拖动框选，可连续框多块</span>
+            <span>
+              <kbd>Enter</kbd> 翻译 {regions.length > 0 ? `${regions.length} 块` : ""}
+            </span>
+            <span>
+              <kbd>Backspace</kbd> 撤销
+            </span>
             <span>
               <kbd>Esc</kbd> 取消
             </span>
-            {shot ? <span>{`${shot.width} × ${shot.height}`}</span> : null}
+            {shotSize ? <span>{`${shotSize.width} × ${shotSize.height}`}</span> : null}
           </>
         )}
       </div>
     </div>
   );
 }
-
-createRoot(document.getElementById("root")!).render(<Overlay />);
 
 /** Fake paper page so the selection UI can be previewed in a browser. */
 function DemoPage() {
@@ -188,12 +255,7 @@ function DemoPage() {
       {Array.from({ length: 14 }).map((_, i) => (
         <div
           key={i}
-          style={{
-            height: 12,
-            width: `${92 - ((i * 7) % 26)}%`,
-            borderRadius: 3,
-            background: "#ded9cc",
-          }}
+          style={{ height: 12, width: `${92 - ((i * 7) % 26)}%`, borderRadius: 3, background: "#ded9cc" }}
         />
       ))}
       <div
@@ -211,3 +273,5 @@ function DemoPage() {
     </div>
   );
 }
+
+createRoot(document.getElementById("root")!).render(<Overlay />);

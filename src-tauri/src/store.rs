@@ -102,6 +102,7 @@ impl Store {
         Ok(self.list()?.into_iter().find(|e| e.id == id))
     }
 
+    /// Store one translation. `pngs` holds every captured region (1..n).
     #[allow(clippy::too_many_arguments)]
     pub fn insert(
         &self,
@@ -112,17 +113,26 @@ impl Store {
         provider: &str,
         model: &str,
         elapsed_ms: u64,
-        png: &[u8],
+        pngs: &[Vec<u8>],
     ) -> Result<(), String> {
-        let rel = format!("images/{id}.png");
-        std::fs::write(self.images_dir.join(format!("{id}.png")), png).map_err(|e| e.to_string())?;
-        let files_json = serde_json::to_string(&vec![rel.clone()]).map_err(|e| e.to_string())?;
+        let mut rels: Vec<String> = Vec::new();
+        for (i, png) in pngs.iter().enumerate() {
+            let name = if pngs.len() == 1 {
+                format!("{id}.png")
+            } else {
+                format!("{id}-{}.png", i + 1)
+            };
+            std::fs::write(self.images_dir.join(&name), png).map_err(|e| e.to_string())?;
+            rels.push(format!("images/{name}"));
+        }
+        let primary = rels.first().cloned().unwrap_or_default();
+        let files_json = serde_json::to_string(&rels).map_err(|e| e.to_string())?;
         self.conn
             .execute(
                 "INSERT OR REPLACE INTO entries
                  (id, timestamp, image_file, image_files_json, prompt, markdown, tags_json, provider, model, elapsed_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, '[]', ?7, ?8, ?9)",
-                params![id, timestamp, rel, files_json, prompt, markdown, provider, model, elapsed_ms as i64],
+                params![id, timestamp, primary, files_json, prompt, markdown, provider, model, elapsed_ms as i64],
             )
             .map_err(|e| e.to_string())?;
         Ok(())

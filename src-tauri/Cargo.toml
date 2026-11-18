@@ -1,6 +1,6 @@
 [package]
 name = "jieyi"
-version = "0.1.0"
+version = "0.2.0"
 description = "截译 — 截图即译"
 edition = "2021"
 rust-version = "1.77"
@@ -23,6 +23,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
+tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.20.0", features = ["v4"] }

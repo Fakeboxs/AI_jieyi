@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, RefreshCw, Trash2 } from "lucide-react";
+import { Download, FileText, Plus, RefreshCw, Square, Tag, Trash2, X } from "lucide-react";
 import type { Entry } from "../types";
 import { copyText } from "../lib/bridge";
 import { renderMarkdown, toPlainText, trimIncompleteMath } from "../lib/markdown";
@@ -31,16 +31,33 @@ export function ResultCard({
   entry,
   onRetranslate,
   onDelete,
+  onUpdateTags,
+  onExport,
   toast,
   busy,
 }: {
   entry: Entry;
   onRetranslate: (id: string) => void;
   onDelete: (id: string) => void;
+  onUpdateTags: (id: string, tags: string[]) => void;
+  onExport: (entry: Entry) => void;
   toast: (text: string, tone?: "default" | "error") => void;
   busy?: boolean;
 }) {
   const plain = useMemo(() => toPlainText(entry.markdown), [entry.markdown]);
+  const [tagInput, setTagInput] = useState("");
+  const [tagOpen, setTagOpen] = useState(false);
+
+  function commitTag() {
+    const t = tagInput.trim();
+    if (!t) {
+      setTagOpen(false);
+      return;
+    }
+    if (!entry.tags.includes(t)) onUpdateTags(entry.id, [...entry.tags, t]);
+    setTagInput("");
+    setTagOpen(false);
+  }
 
   async function copyPlain() {
     const ok = await copyText(plain);
@@ -84,6 +101,14 @@ export function ResultCard({
           </button>
           <button
             className="btn btn-ghost btn-icon"
+            onClick={() => onExport(entry)}
+            title="导出为 .md"
+            aria-label="导出为 .md"
+          >
+            <Download size={15} />
+          </button>
+          <button
+            className="btn btn-ghost btn-icon"
             onClick={() => onRetranslate(entry.id)}
             title="重新翻译"
             aria-label="重新翻译"
@@ -108,6 +133,43 @@ export function ResultCard({
           <p style={{ color: "var(--muted-fg)" }}>这条记录还没有译文。</p>
         )}
       </div>
+      <footer className="result-tags">
+        <Tag size={13} />
+        {entry.tags.map((t) => (
+          <span className="chip" key={t}>
+            {t}
+            <button
+              className="chip-x"
+              aria-label={`移除标签 ${t}`}
+              onClick={() => onUpdateTags(entry.id, entry.tags.filter((x) => x !== t))}
+            >
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        {tagOpen ? (
+          <input
+            className="tag-input"
+            autoFocus
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onBlur={commitTag}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitTag();
+              if (e.key === "Escape") {
+                setTagInput("");
+                setTagOpen(false);
+              }
+            }}
+            placeholder="标签名，回车确认"
+            aria-label="新增标签"
+          />
+        ) : (
+          <button className="chip" onClick={() => setTagOpen(true)}>
+            <Plus size={11} /> 标签
+          </button>
+        )}
+      </footer>
     </article>
   );
 }
@@ -140,6 +202,8 @@ export function StreamingResult({
   provider,
   model,
   progressive,
+  imageCount,
+  onStop,
   toast,
 }: {
   text: string;
@@ -147,6 +211,8 @@ export function StreamingResult({
   model: string;
   /** true = SSE，边收边渲染；false = 直出，等整段 */
   progressive: boolean;
+  imageCount?: number;
+  onStop: () => void;
   toast: (text: string, tone?: "default" | "error") => void;
 }) {
   return (
@@ -160,10 +226,14 @@ export function StreamingResult({
           <i className="dot" />
           <span className="stream-badge">
             <span className="spinner" />
-            生成中
+            生成中{imageCount && imageCount > 1 ? ` · ${imageCount} 张截图` : ""}
           </span>
         </div>
         <div className="result-actions">
+          <button className="btn btn-ghost" onClick={onStop} title="停止生成并保留已生成内容">
+            <Square size={13} />
+            停止
+          </button>
           <CopyButton
             text={text}
             label={progressive ? "复制已有部分" : "复制译文"}

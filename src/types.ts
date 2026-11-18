@@ -1,4 +1,4 @@
-export type Provider = "openai" | "anthropic" | "gemini" | "custom";
+export type Provider = "openai" | "anthropic" | "gemini" | "custom" | "advanced";
 
 export interface Entry {
   id: string;
@@ -13,6 +13,18 @@ export interface Entry {
   image_count: number;
 }
 
+export interface HeaderKV {
+  key: string;
+  value: string;
+}
+
+export interface AdvancedConfig {
+  endpoint: string;
+  headers: HeaderKV[];
+  body: string;
+  response_path: string;
+}
+
 export interface Config {
   provider: Provider;
   base_url: string;
@@ -24,6 +36,11 @@ export interface Config {
   theme: "light" | "dark" | "system";
   /** true = SSE 流式；false = 一次性直出 */
   stream: boolean;
+  /** -1 = 鼠标所在显示器；0..n = 指定显示器 */
+  capture_screen: number;
+  /** 再次截图时预选上次的框选区域 */
+  remember_region: boolean;
+  advanced: AdvancedConfig;
 }
 
 export interface TranslationStart {
@@ -31,6 +48,7 @@ export interface TranslationStart {
   provider: string;
   model: string;
   stream: boolean;
+  image_count: number;
 }
 
 export interface ShotReady {
@@ -42,3 +60,21 @@ export interface ShotReady {
 }
 
 export type Status = "idle" | "capturing" | "translating" | "error";
+
+export interface MonitorInfo {
+  index: number;
+  name: string;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+  scale: number;
+  primary: boolean;
+}
+
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}

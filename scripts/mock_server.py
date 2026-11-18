@@ -4,6 +4,7 @@ without spending tokens. Returns a fixed translated paragraph with LaTeX.
     python scripts/mock_server.py 8899
 """
 import json
+import os
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -64,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
             self._stream(body)
             return
         # Simulate a slow one-shot completion so the non-streaming UI state is visible.
-        time.sleep(0.9)
+        time.sleep(ONESHOT_DELAY)
         self._send(
             200,
             {
@@ -95,13 +96,17 @@ class Handler(BaseHTTPRequestHandler):
             payload = {"choices": [{"index": 0, "delta": {"content": piece}}]}
             self.wfile.write(f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode())
             self.wfile.flush()
-            time.sleep(0.035)
+            time.sleep(CHUNK_DELAY)
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
 
     def log_message(self, fmt, *args):
         pass
 
+
+# Env knobs so a human can actually click "停止" mid-stream during testing.
+CHUNK_DELAY = float(os.environ.get("JIEYI_MOCK_CHUNK_DELAY", "0.035"))
+ONESHOT_DELAY = float(os.environ.get("JIEYI_MOCK_ONESHOT_DELAY", "0.9"))
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8899

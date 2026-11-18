@@ -26,6 +26,8 @@ pub struct ShotInfo {
     pub width: u32,
     pub height: u32,
     pub scale: f64,
+    /// last rectangle used on this monitor (CSS px), for pre-selection
+    pub last_region: Option<[f64; 4]>,
 }
 
 fn cursor_pos() -> (i32, i32) {
@@ -42,10 +44,48 @@ fn cursor_pos() -> (i32, i32) {
     }
 }
 
-/// Grab the monitor currently under the cursor.
-pub fn capture() -> Result<PendingShot, String> {
-    let (cx, cy) = cursor_pos();
-    let monitor = xcap::Monitor::from_point(cx, cy).map_err(|e| format!("找不到显示器：{e}"))?;
+#[derive(Serialize, Clone)]
+pub struct MonitorInfo {
+    pub index: i32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub x: i32,
+    pub y: i32,
+    pub scale: f64,
+    pub primary: bool,
+}
+
+pub fn list_monitors() -> Result<Vec<MonitorInfo>, String> {
+    let monitors = xcap::Monitor::all().map_err(|e| format!("枚举显示器失败：{e}"))?;
+    Ok(monitors
+        .iter()
+        .enumerate()
+        .map(|(i, m)| MonitorInfo {
+            index: i as i32,
+            name: m.name().unwrap_or_else(|_| format!("显示器 {}", i + 1)),
+            width: m.width().unwrap_or(0),
+            height: m.height().unwrap_or(0),
+            x: m.x().unwrap_or(0),
+            y: m.y().unwrap_or(0),
+            scale: m.scale_factor().unwrap_or(1.0) as f64,
+            primary: m.is_primary().unwrap_or(false),
+        })
+        .collect())
+}
+
+/// Grab a monitor: `index < 0` means "whichever screen the cursor is on".
+pub fn capture(index: i32) -> Result<PendingShot, String> {
+    let monitor = if index < 0 {
+        let (cx, cy) = cursor_pos();
+        xcap::Monitor::from_point(cx, cy).map_err(|e| format!("找不到显示器：{e}"))?
+    } else {
+        let monitors = xcap::Monitor::all().map_err(|e| format!("枚举显示器失败：{e}"))?;
+        monitors
+            .into_iter()
+            .nth(index as usize)
+            .ok_or_else(|| format!("显示器 {index} 不存在"))?
+    };
 
     let scale = monitor.scale_factor().unwrap_or(1.0) as f64;
     let image = monitor.capture_image().map_err(|e| format!("抓屏失败：{e}"))?;
