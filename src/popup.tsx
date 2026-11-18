@@ -19,6 +19,7 @@ export default function Popup() {
   const [entryId, setEntryId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [ttft, setTtft] = useState(0);
+  const [thinking, setThinking] = useState(0);
   const startedAt = useRef(0);
 
   useEffect(() => {
@@ -27,6 +28,7 @@ export default function Popup() {
 
     const reset = () => {
       setText("");
+      setThinking(0);
       setError("");
       setBusy(true);
       setCopied(false);
@@ -90,6 +92,11 @@ export default function Popup() {
             );
           },
         ),
+      );
+      await reg(
+        listen<{ chars: number }>("translation:thinking", (e) => {
+          setThinking(e.payload.chars);
+        }),
       );
       await reg(
         listen<{ message: string }>("translation:error", (e) => {
@@ -196,7 +203,7 @@ export default function Popup() {
             ) : busy ? (
               <div className="popup-skeleton">
                 <span className="spinner" />
-                正在识别并翻译…
+                {thinking > 0 ? `模型正在思考（已 ${thinking} 字）…` : "正在识别并翻译…"}
               </div>
             ) : (
               <p style={{ color: "var(--muted-fg)" }}>还没有内容。</p>

@@ -576,17 +576,33 @@ async fn execute(
     if cfg.stream {
         let handle = app.clone();
         let stream_id = id.to_string();
-        let result = providers::translate_stream(client, cfg, &b64s, mime, cancel, move |delta| {
-            {
-                let st = handle.state::<AppState>();
-                let mut run = st.run.lock().unwrap();
-                run.text.push_str(delta);
-            }
-            let _ = handle.emit(
-                "translation:chunk",
-                serde_json::json!({ "id": stream_id, "text": delta }),
-            );
-        })
+        let thought_handle = handle.clone();
+        let thought_id = id.to_string();
+        let result = providers::translate_stream(
+            client,
+            cfg,
+            &b64s,
+            mime,
+            cancel,
+            move |delta| {
+                {
+                    let st = handle.state::<AppState>();
+                    let mut run = st.run.lock().unwrap();
+                    run.text.push_str(delta);
+                }
+                let _ = handle.emit(
+                    "translation:chunk",
+                    serde_json::json!({ "id": stream_id, "text": delta }),
+                );
+            },
+            move |chars| {
+                // reasoning tokens: tell the UI we are still working
+                let _ = thought_handle.emit(
+                    "translation:thinking",
+                    serde_json::json!({ "id": thought_id, "chars": chars }),
+                );
+            },
+        )
         .await;
         finish_run(app, &result);
         result

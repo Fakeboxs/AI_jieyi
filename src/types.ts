@@ -46,6 +46,8 @@ export interface Config {
   image_max_edge: number;
   /** 需要压成 JPEG 时的质量 50–95 */
   image_quality: number;
+  /** "off" = 显式关闭思考（DeepSeek 默认开启）；"default" = 不干预；"on" = 开启 */
+  thinking: "off" | "default" | "on";
   advanced: AdvancedConfig;
 }
 

@@ -82,6 +82,15 @@ fn parse_advanced(a: &Advanced, body: &Value) -> Result<String, String> {
     ))
 }
 
+/// Reasoning tokens (DeepSeek `reasoning_content`): shown as "thinking…", never
+/// mixed into the translation.
+fn delta_reasoning(v: &Value) -> Option<String> {
+    v.pointer("/choices/0/delta/reasoning_content")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// Pull the incremental text out of one SSE `data:` payload.
 fn delta_text(provider: &str, v: &Value) -> Option<String> {
     match provider {
@@ -280,6 +289,18 @@ fn build_request(
             if stream {
                 body["stream"] = json!(true);
             }
+            // DeepSeek turns thinking ON by default (effort=high), which spends
+            // seconds before the first visible character. Translation never needs
+            // it, so we ask for it to be switched off unless the user opted in.
+            match cfg.thinking.as_str() {
+                "off" => {
+                    body["thinking"] = json!({ "type": "disabled" });
+                }
+                "on" => {
+                    body["thinking"] = json!({ "type": "enabled" });
+                }
+                _ => {}
+            }
             client
                 .post(url)
                 .header("authorization", format!("Bearer {}", cfg.api_key.trim()))
@@ -321,13 +342,14 @@ pub async fn translate(
 
 /// SSE request: every delta is pushed through `on_delta`. `cancel` lets the user
 /// stop mid-generation — whatever already arrived is kept.
-pub async fn translate_stream<F: FnMut(&str)>(
+pub async fn translate_stream<F: FnMut(&str), G: FnMut(usize)>(
     client: &reqwest::Client,
     cfg: &Config,
     images_b64: &[String],
     mime: &str,
     cancel: Arc<AtomicBool>,
     mut on_delta: F,
+    mut on_thought: G,
 ) -> Result<Translation, String> {
     let started = Instant::now();
     let resp = build_request(client, cfg, images_b64, mime, true)?
@@ -346,6 +368,7 @@ pub async fn translate_stream<F: FnMut(&str)>(
     let mut out = String::new();
     let mut cancelled = false;
     let mut ttft_ms = 0u64;
+    let mut reasoning_chars = 0usize;
 
     'read: while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::Relaxed) {
@@ -372,6 +395,13 @@ pub async fn translate_stream<F: FnMut(&str)>(
                 };
                 if let Some(msg) = value.pointer("/error/message").and_then(|x| x.as_str()) {
                     return Err(msg.to_string());
+                }
+                if let Some(thought) = delta_reasoning(&value) {
+                    if ttft_ms == 0 {
+                        reasoning_chars += thought.chars().count();
+                        let _ = on_thought(reasoning_chars);
+                    }
+                    continue;
                 }
                 if let Some(delta) = delta_text(&cfg.provider, &value) {
                     if !delta.is_empty() {

@@ -45,6 +45,9 @@ pub struct Config {
     pub image_max_edge: u32,
     /// 需要压成 JPEG 时的质量（50–95）
     pub image_quality: u8,
+    /// 思考模式：off = 显式关闭（DeepSeek 默认开启，翻译会白等几秒）；
+    /// default = 不干预；on = 显式开启
+    pub thinking: String,
     pub advanced: Advanced,
 }
 
@@ -65,6 +68,7 @@ impl Default for Config {
             result_window: "popup".into(),
             image_max_edge: 1440,
             image_quality: 86,
+            thinking: "off".into(),
             advanced: Advanced::default(),
         }
     }

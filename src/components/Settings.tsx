@@ -311,7 +311,10 @@ export function Settings({
         </Section>
       ) : null}
 
-      <Section title="翻译偏好" desc="提示词决定了译文风格、是否保留公式与段落结构">
+      <Section
+        title="翻译偏好"
+        desc="提示词决定了译文风格、是否保留公式与段落结构；思考模式决定了要等多久才见到第一个字"
+      >
         <div className="field">
           <label>输出方式</label>
           <div className="segmented" role="group" aria-label="输出方式">
@@ -337,6 +340,29 @@ export function Settings({
             spellCheck={false}
           />
           <span className="hint">建议明确要求：只输出译文、公式用 LaTeX、保留段落结构。</span>
+        </div>
+        <div className="field">
+          <label>思考模式</label>
+          <div className="segmented" role="group" aria-label="思考模式">
+            {(
+              [
+                ["off", "关闭（最快）"],
+                ["default", "服务商默认"],
+                ["on", "开启"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                aria-pressed={draft.thinking === value}
+                onClick={() => patch({ thinking: value })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="hint">
+            DeepSeek 的思考模式**默认开启**（effort=high），会在输出译文前先想几秒——这就是"一百来个单词要等十秒"的主因。翻译不需要推理，选「关闭」通常能把首字压到 1 秒内；若服务商不认识该参数，改回「服务商默认」。
+          </span>
         </div>
         <div className="row-2">
           <div className="field">

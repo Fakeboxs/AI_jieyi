@@ -22,8 +22,8 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 
 | 文件 | 大小 | 适合 |
 |---|---|---|
-| `JieYi_0.4.0_x64-setup.exe` | 4.0 MB | 推荐。当前用户安装（无需管理员），中文向导，缺 WebView2 自动下载 |
-| `JieYi-0.4.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
+| `JieYi_0.4.1_x64-setup.exe` | 4.0 MB | 推荐。当前用户安装（无需管理员），中文向导，缺 WebView2 自动下载 |
+| `JieYi-0.4.1-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
 
 首次运行若被 SmartScreen 拦下：**更多信息 → 仍要运行**（安装包未做代码签名）。
 
@@ -46,6 +46,7 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 - **上次选区记忆**：再次截图时用虚线预选上次的框（可直接 `Enter` 复用，也可以随手拖新框顶掉它）；`Ctrl+Alt+D` 则完全跳过选区，直接按上次位置翻译
 - **多显示器**：设置里可选「跟随鼠标所在屏幕」或固定某一块屏幕
 - **结果用独立小窗**：热键翻译的译文出现在选区旁边的窄边置顶浮窗（460px、无标题栏、可拖动缩放），不打断你正在做的事；可在设置里切回主窗口
+- **默认关闭思考模式**：DeepSeek 等模型默认开启 thinking，会先"想"几秒甚至吃掉整个 token 预算；应用默认发 `thinking: {"type":"disabled"}`，实测首字从"等十秒/不出字"降到 **1s 左右**（设置里可改回服务商默认或开启）
 - **流式 / 直出可选**：SSE 流式（默认，首字即显示、边生成边排版、末尾打字光标）或一次性直出；**流式中途可以随时「停止」**，已生成的部分会保留并照常入库
 - **多服务商**：OpenAI 兼容（SiliconFlow / DashScope 兼容模式 / 本地 vLLM、Xinference）、Anthropic `/v1/messages`、Gemini `generateContent`、自定义端点
 - **高级 API 模板**：自己写 endpoint / headers / request body，用 `{{model}}`、`{{prompt_json}}`、`{{image_parts}}`、`{{stream}}`、`{{api_key}}` 等占位符拼装，响应字段用 JSON Pointer 指定——任何非标准协议都能接
@@ -193,14 +194,14 @@ python scripts/make_release.py         # 汇总 dist-release：安装包 + 便�
 
 | 文件 | 说明 |
 |---|---|
-| `JieYi_0.4.0_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
-| `JieYi-0.4.0-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
+| `JieYi_0.4.1_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
+| `JieYi-0.4.1-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
 | `发布说明.md` / `SHA256SUMS.txt` | 面向用户的说明与校验和 |
 
 **未做代码签名**，分发时提醒用户：SmartScreen 提示 → 更多信息 → 仍要运行。要彻底消除需要签名证书：
 
 ```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.4.0_x64-setup.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.4.1_x64-setup.exe
 ```
 
 > 改了 `productName`（当前为「截译」）会同时改变安装目录、快捷方式与「应用」里的显示名；`identifier` 保持不变，所以升级不会丢数据。
