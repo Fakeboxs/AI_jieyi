@@ -6,10 +6,13 @@ import {
   downloadPack,
   listMonitors,
   offlineLanguages,
+  localStatus,
   offlineStatus,
   onOfflineEngine,
   onOfflineProgress,
+  startLocalEngine,
   stopLocalEngine,
+  type LocalStatus,
   type OfflineEngineState,
   type PackInfo,
 } from "../lib/bridge";
@@ -707,6 +710,8 @@ function OfflinePanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [engine, setEngine] = useState<OfflineEngineState | null>(null);
   const [langs, setLangs] = useState<string[]>([]);
+  const [status, setStatus] = useState<LocalStatus | null>(null);
+  const [starting, setStarting] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -716,8 +721,17 @@ function OfflinePanel({
     }
   }, []);
 
+  const refreshStatus = useCallback(async () => {
+    try {
+      setStatus(await localStatus());
+    } catch {
+      setStatus(null);
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
+    void refreshStatus();
     offlineLanguages().then(setLangs).catch(() => setLangs([]));
     const offs: (() => void)[] = [];
     let gone = false;
@@ -728,12 +742,17 @@ function OfflinePanel({
         void reload();
       }
     }).then((fn) => (gone ? fn() : offs.push(fn)));
-    onOfflineEngine((p) => setEngine(p)).then((fn) => (gone ? fn() : offs.push(fn)));
+    onOfflineEngine((p) => {
+      setEngine(p);
+      if (p.state === "ready" || p.state === "error" || p.state === "stopped") {
+        void refreshStatus();
+      }
+    }).then((fn) => (gone ? fn() : offs.push(fn)));
     return () => {
       gone = true;
       offs.forEach((fn) => fn());
     };
-  }, [reload]);
+  }, [reload, refreshStatus]);
 
   async function start(id: string) {
     setBusy(id);
@@ -746,6 +765,28 @@ function OfflinePanel({
       setBusy(null);
       void reload();
     }
+  }
+
+  async function boot() {
+    setStarting(true);
+    try {
+      const r = await startLocalEngine();
+      setStatus(r);
+      toast(r.port ? `本地服务已启动（端口 ${r.port}）` : "本地服务已启动");
+    } catch (e) {
+      toast(`启动失败：${String(e)}`, "error");
+    } finally {
+      setStarting(false);
+      void refreshStatus();
+      void reload();
+    }
+  }
+
+  async function shutdown() {
+    await stopLocalEngine();
+    setEngine({ state: "stopped" });
+    void refreshStatus();
+    toast("本地服务已停止，内存/显存已释放");
   }
 
   async function remove(id: string) {
@@ -825,11 +866,19 @@ function OfflinePanel({
       </div>
 
       <div className="field">
-        <label>本地引擎状态</label>
+        <label>本地服务</label>
         <div className="pack-row">
           <div className="pack-main">
             <div className="pack-status">
-              {engine ? `${engineLabel[engine.state]}${engine.port ? `（端口 ${engine.port}）` : ""}${engine.message ? ` · ${engine.message}` : ""}` : "首次翻译时会自动启动"}
+              {starting
+                ? "正在下载 / 部署 / 加载，稍等…"
+                : status?.running
+                  ? `运行中 · 端口 ${status.port ?? "?"} · ${status.engine === "ocr" ? "轻量 OCR" : "视觉模型"}`
+                  : engine
+                    ? `${engineLabel[engine.state]}${engine.message ? ` · ${engine.message}` : ""}`
+                    : status?.ready === false
+                      ? `未启动 · 还需下载 ${human(status.missing_bytes)}`
+                      : "未启动（点右侧按钮即可，缺什么会自动下载）"}
             </div>
             {draft.offline_engine === "ocr" ? (
               <div className="pack-desc">
@@ -843,13 +892,19 @@ function OfflinePanel({
             ) : null}
           </div>
           <div className="pack-actions">
-            <button className="btn btn-ghost" onClick={() => void stopLocalEngine()} disabled={!engine || engine.state === "stopped"}>
-              卸载模型
-            </button>
+            {status?.running ? (
+              <button className="btn btn-ghost" onClick={() => void shutdown()} disabled={starting}>
+                停止本地服务
+              </button>
+            ) : (
+              <button className="btn btn-primary" onClick={() => void boot()} disabled={starting}>
+                {starting ? "启动中…" : status?.ready === false ? "启动（自动下载）" : "启动本地服务"}
+              </button>
+            )}
           </div>
         </div>
         <span className="hint">
-          「卸载模型」会把本地模型从显存/内存里退出，翻译时会自动重新加载；退出应用时也会自动退出。
+          点「启动」时如果模型或运行时还没下载，会先自动下载并解压（视觉包约 2.8 GB），装好立刻启动；关闭或强杀本应用时，本地服务会一起退出（Windows 作业对象），不会在后台占内存。翻译时若还没启动也会自动拉起。
         </span>
       </div>
     </div>

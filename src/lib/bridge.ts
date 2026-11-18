@@ -212,6 +212,25 @@ export async function deletePack(id: string): Promise<void> {
   await call<void>("delete_pack", { id });
 }
 
+export type LocalStatus = {
+  running: boolean;
+  port?: number | null;
+  engine: string;
+  ready: boolean;
+  missing_bytes: number;
+};
+
+export async function localStatus(): Promise<LocalStatus | null> {
+  if (!inTauri) return null;
+  return call<LocalStatus>("local_status");
+}
+
+/** Download whatever is missing, deploy it, then start the sidecar. */
+export async function startLocalEngine(): Promise<LocalStatus> {
+  if (!inTauri) throw new Error("仅桌面版支持本地引擎");
+  return call<LocalStatus>("start_local_engine");
+}
+
 export async function stopLocalEngine(): Promise<void> {
   if (!inTauri) return;
   await call<void>("stop_local_engine");

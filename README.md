@@ -22,8 +22,8 @@
 22|
 23|| 文件 | 大小 | 适合 |
 24||---|---|---|
-| `JieYi_0.6.0_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
-| `JieYi-0.6.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
+| `JieYi_0.6.1_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
+| `JieYi-0.6.1-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
 | 离线模型（不入库） | 39 MB / 2.8 GB / 1.1 GB | **资源包不随发布上传**，按下表链接自行下载，见「离线翻译」一节的目录结构 |
 27|
 28|首次运行若被 SmartScreen 拦下：**更多信息 → 仍要运行**（安装包未做代码签名）。
@@ -86,10 +86,12 @@
 
 两个引擎共用同一个 `llama.cpp` 运行时（Vulkan 版，约 40 MB，NVIDIA / AMD / Intel 都能用，没有显卡时自动回落 CPU），应用会在首次翻译时自己把它启动起来，退出应用时再关掉——不需要你开终端、装 Ollama。
 
-- **资源包一键下载**：设置里点「下载」，带进度条、断点续传与镜像（HuggingFace → hf-mirror，llama.cpp → gh-proxy），校验大小与 GGUF magic，坏包会自动重下。
+- **一个按钮搞定**：设置 → 本地服务 →「启动」。缺模型就自动下载 → 自动解压部署 → 直接启动；已经装好就直接加载。启动后显示「运行中 · 端口 xxxxx」，按钮变「停止本地服务」。
+- **资源包下载**：带进度条、断点续传与镜像（HuggingFace → hf-mirror，llama.cpp → gh-proxy），校验大小与 GGUF magic，坏包会自动重下。
 - **完全离线**：文件落在 `%APPDATA%\app.jieyi.desktop\models`，下载完之后拔网线也能用；把整个 `models` 目录拷到另一台机器同样有效。
 - **实测（RTX 5060 8GB，780×270 英文截图）**：视觉模型首字 1.7 s、整段 2.1 s；3B 占显存约 2.4 GB。CPU 也能跑，只是慢 3–5 倍。
 - **显存不够会自动报错**：错误里带上 `llama-server.log` 的尾部，直接告诉你是显存还是文件问题。
+- **不留后台进程**：`llama-server` 被放进 Windows 作业对象（`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`），无论正常退出还是被任务管理器强杀，它都会跟着结束，不会留下一个占 2.3 GB 的孤儿进程。
 
 > 质量提示：本地 3B 模型对长段落和密集公式不如云端大模型稳，术语偶尔选错（例如把 partition function 译成「分区函数」）。建议**联网时用 API、断网时自动兜底**，而不是二选一。
 >
@@ -248,14 +250,14 @@ models/
 203|
 204|| 文件 | 说明 |
 205||---|---|
-206|| `JieYi_0.6.0_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
-207|| `JieYi-0.6.0-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
+206|| `JieYi_0.6.1_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
+207|| `JieYi-0.6.1-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
 208|| `发布说明.md` / `SHA256SUMS.txt` | 面向用户的说明与校验和 |
 209|
 210|**未做代码签名**，分发时提醒用户：SmartScreen 提示 → 更多信息 → 仍要运行。要彻底消除需要签名证书：
 211|
 212|```powershell
-213|signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.6.0_x64-setup.exe
+213|signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.6.1_x64-setup.exe
 214|```
 215|
 216|> 改了 `productName`（当前为「截译」）会同时改变安装目录、快捷方式与「应用」里的显示名；`identifier` 保持不变，所以升级不会丢数据。

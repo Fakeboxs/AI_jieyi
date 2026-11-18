@@ -443,6 +443,84 @@ fn offline_status(state: State<'_, AppState>) -> Vec<models::PackInfo> {
     models::status(&state.config_dir)
 }
 
+#[derive(serde::Serialize)]
+struct LocalStatus {
+    running: bool,
+    port: Option<u16>,
+    engine: String,
+    /// true when everything the chosen engine needs is already on disk
+    ready: bool,
+    /// bytes still to download before the engine can start
+    missing_bytes: u64,
+}
+
+fn local_status_now(app: &AppHandle) -> LocalStatus {
+    let st = app.state::<AppState>();
+    let cfg = st.cfg.lock().unwrap().clone();
+    let engine = if cfg.offline_engine == "ocr" { "ocr" } else { "vlm" };
+    let packs = models::status(&st.config_dir);
+    let need: Vec<&str> = if engine == "ocr" {
+        vec!["runtime", "ocr"]
+    } else {
+        vec!["runtime", "vlm"]
+    };
+    let missing: u64 = packs
+        .iter()
+        .filter(|p| need.contains(&p.id.as_str()) && !p.installed)
+        .map(|p| p.bytes.saturating_sub(p.present_bytes))
+        .sum();
+    let mut guard = st.local.lock().unwrap();
+    let running = guard
+        .as_mut()
+        .map(|s| s.child.try_wait().ok().flatten().is_none())
+        .unwrap_or(false);
+    if !running {
+        *guard = None;
+    }
+    LocalStatus {
+        running,
+        port: guard.as_ref().map(|s| s.port),
+        engine: engine.to_string(),
+        ready: missing == 0,
+        missing_bytes: missing,
+    }
+}
+
+#[tauri::command]
+fn local_status(app: AppHandle) -> LocalStatus {
+    local_status_now(&app)
+}
+
+/// One button: download whatever is missing, deploy it, then start the sidecar.
+#[tauri::command]
+async fn start_local_engine(app: AppHandle, state: State<'_, AppState>) -> Result<LocalStatus, String> {
+    let cfg = state.cfg.lock().unwrap().clone();
+    let engine = if cfg.offline_engine == "ocr" { "ocr" } else { "vlm" };
+    let dir = state.config_dir.clone();
+    let need: Vec<&'static str> = if engine == "ocr" {
+        vec!["runtime", "ocr"]
+    } else {
+        vec!["runtime", "vlm"]
+    };
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let packs = models::status(&dir);
+        for id in need {
+            let done = packs.iter().any(|p| p.id == id && p.installed);
+            if !done {
+                models::download(&handle, &dir, id)?;
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let _ = ensure_local(&app, engine)?;
+    Ok(local_status_now(&app))
+}
+
 #[tauri::command]
 fn offline_languages() -> Vec<String> {
     ocr::available_languages()
@@ -1162,6 +1240,8 @@ pub fn run() {
             retranslate,
             test_connection,
             offline_status,
+            local_status,
+            start_local_engine,
             download_pack,
             delete_pack,
             stop_local_engine,

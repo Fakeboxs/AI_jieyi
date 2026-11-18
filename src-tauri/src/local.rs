@@ -13,6 +13,43 @@ pub struct LocalServer {
     pub child: Child,
     pub port: u16,
     pub engine: String,
+    /// Windows job object holding the sidecar: if this process dies for any
+    /// reason (including Task Manager "End task"), the job handle is closed by
+    /// the kernel and the sidecar is killed with it. No orphaned 2.4 GB.
+    #[cfg(windows)]
+    job: Option<isize>,
+}
+
+#[cfg(windows)]
+fn attach_kill_on_close(child: &Child) -> Option<isize> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    unsafe {
+        let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+        if job.is_null() {
+            return None;
+        }
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let ok = SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &info as *const _ as *const core::ffi::c_void,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        );
+        if ok == 0 {
+            CloseHandle(job);
+            return None;
+        }
+        // Fails harmlessly when the process is already inside another job.
+        AssignProcessToJobObject(job, child.as_raw_handle() as HANDLE);
+        Some(job as isize)
+    }
 }
 
 impl LocalServer {
@@ -23,6 +60,12 @@ impl LocalServer {
     pub fn stop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        #[cfg(windows)]
+        if let Some(job) = self.job.take() {
+            unsafe {
+                windows_sys::Win32::Foundation::CloseHandle(job as *mut core::ffi::c_void);
+            }
+        }
     }
 }
 
@@ -104,10 +147,14 @@ pub fn start(app: &AppHandle, config_dir: &Path, engine: &str) -> Result<LocalSe
     let child = cmd
         .spawn()
         .map_err(|e| format!("启动本地模型失败：{e}（路径 {}）", runtime.display()))?;
+    #[cfg(windows)]
+    let job = attach_kill_on_close(&child);
     let mut server = LocalServer {
         child,
         port,
         engine: engine.to_string(),
+        #[cfg(windows)]
+        job,
     };
 
     // 3B + mmproj on a cold page cache can take a while; be patient but bounded.

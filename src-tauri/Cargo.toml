@@ -1,6 +1,6 @@
 [package]
 name = "jieyi"
-version = "0.6.0"
+version = "0.6.1"
 description = "截译 — 截图即译"
 edition = "2021"
 rust-version = "1.77"
@@ -38,7 +38,7 @@ windows = { version = "0.62", features = [
     "Storage_Streams",
 ] }
 windows-future = "0.3"
-windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
+windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }
 xcap = "0.9.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
