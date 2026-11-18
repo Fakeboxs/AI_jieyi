@@ -154,7 +154,7 @@ models/
 107|JIEYI_MOCK_CHUNK_DELAY=0.25 python scripts/mock_server.py 8899   # 放慢分片，方便试「停止」
 108|```
 109|
-110|把设置里的 API 基础地址改成 `http://127.0.0.1:8899/v1`，Key 随便填，模型填 `mock-vl`，然后 `Ctrl+Alt+S` 框一块屏幕即可跑通全链路。
+110|测试&初始默认设置，把设置里的 API 基础地址改成 `http://127.0.0.1:8899/v1`，Key 随便填，模型填 `mock-vl`，然后 `Ctrl+Alt+S` 框一块屏幕即可跑通全链路。
 111|
 112|## 结构
 113|
