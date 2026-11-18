@@ -152,28 +152,6 @@ scripts/                  图标生成 / mock 服务 / 打包脚本
 `stream` 由应用决定：模板里没写 `stream` 字段时，流式模式会自动补上 `"stream": true`。
 响应字段填 JSON Pointer（如 `/choices/0/message/content`），留空则自动尝试 OpenAI / Anthropic / Gemini 的常见结构。
 
-## 已验证（真机跑过，不是"应该能跑"）
-
-| 项 | 结果 |
-|---|---|
-| 全局热键 | `Ctrl+Alt+S` 在桌面任意位置触发，覆盖层出现；`Ctrl+Alt+D` 跳过选区直接翻译 |
-| 抓屏 + 框选 | 冻结画面、拖动有尺寸提示、`Esc` 取消 |
-| **多块合并** | 连拖两块后 `Enter`：mock 日志 `images=2 bytes=89536 stream=True`（**一次请求**），库里 `image_files_json` 两条、磁盘两张 PNG，译文一份 |
-| **停止生成** | 流式中途点「停止」：2.0s 落库 95 字符（完整版 367 字符），服务端记录连接被客户端中止（`WinError 10053`），toast「已停止生成，保留了已生成的部分」，按钮恢复为「复制译文」 |
-| **高级模板** | `provider=advanced`、`model=adv-mock-vl`，自定义 header + 占位符 + JSON Pointer 全部生效，367 字符流式返回；模板写错时 toast 精确到行列（`expected ',' or '}' at line 6 column 55`） |
-| **标签编辑** | 结果页加 `physics` → 变成 chip，`tags_json` = `["physics"]`，归档页按标签过滤正常 |
-| **导出 .md** | 系统保存对话框 → 落盘 289 字节，含译文、`标签：physics` 与「由截译导出 · 时间 · 模型」脚注 |
-| **上次选区** | `last_region.json` = `{"x":420,"y":330,"w":620,"h":290}`；再次截图虚线预选，随手拖新框会顶掉预选 |
-| 响应解析 + 落库 | `entries` 新增行，主窗口自动切到结果页 |
-| 渲染 | 标题/段落/行内公式/独立公式/表格/引用块全部正确 |
-| 一键复制 | 按钮变「✓ 已复制」+ toast；剪贴板内容 = 367 字符 Markdown |
-| 错误路径 | 未填 Key → toast「还没有填写 API Key（设置 → 模型服务）」，不崩 |
-| release 构建 | `target/release/jieyi.exe` 8.76MB；NSIS 安装包 `JieYi_0.2.0_x64-setup.exe` 3.93MB |
-| 安装/卸载 | 静默装 → `%LOCALAPPDATA%\截译`，注册表/桌面/开始菜单齐全；`uninstall.exe /S` 全部清除，用户数据保留 |
-| SSE 流式 | `stream=True`；首字 0.3s 内出现、带「生成中」+ 光标；完成后徽标消失 |
-| 直出模式 | `stream=False`；骨架屏 + 禁用按钮，整段到达后一次渲染 |
-
-> 未在本机验证：真正的双屏/三屏硬件（测试环境只有一块屏）——「跟随鼠标」与「指定屏幕」两条分支都按显示器坐标 + 缩放比实现，但没在物理双屏上跑过。
 
 ## 体积与内存（实测）
 
@@ -201,12 +179,6 @@ scripts/                  图标生成 / mock 服务 / 打包脚本
 | 多显示器、上次选区记忆 | 已移植：指定屏幕 + 虚线预选 + `Ctrl+Alt+D` 直达 |
 | Umami 匿名统计默认开启 | 无任何遥测 |
 
-## 还没做（下一步候选）
-
-1. 安装包签名 + 自动更新（Tauri updater）
-2. macOS / Linux 构建（`capture.rs` 需换平台实现）
-3. 译文导出 PDF、整个归档批量导出
-4. 目标语言可选（不止中文）
 
 ## 分发
 
