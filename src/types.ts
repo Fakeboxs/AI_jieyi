@@ -1,4 +1,4 @@
-export type Provider = "openai" | "anthropic" | "gemini" | "custom" | "advanced";
+export type Provider = "openai" | "anthropic" | "gemini" | "custom" | "local" | "advanced";
 
 export interface Entry {
   id: string;
@@ -48,6 +48,8 @@ export interface Config {
   image_quality: number;
   /** "off" = 显式关闭思考（DeepSeek 默认开启）；"default" = 不干预；"on" = 开启 */
   thinking: "off" | "default" | "on";
+  /** 离线引擎：off = 纯云端；vlm = 本地视觉模型；ocr = 系统 OCR + 小模型 */
+  offline_engine: "off" | "vlm" | "ocr";
   /** 全局截图快捷键，如 "Ctrl+Alt+S" */
   hotkey_capture: string;
   /** 重复上次区域快捷键，如 "Ctrl+Alt+D" */

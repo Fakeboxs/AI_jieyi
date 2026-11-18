@@ -667,3 +667,24 @@ body.popup-body-host { background: transparent; margin: 0; }
 }
 .hotkey-hint { font-size: 12px; color: var(--muted-fg); }
 .banner-danger { color: var(--danger); border-color: var(--danger); }
+
+/* settings: offline packs */
+.offline-panel { display: grid; gap: var(--space-4); }
+.pack-row {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--card-2, var(--card));
+}
+.pack-main { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.pack-title { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-strong); }
+.pack-size { font-size: 11px; color: var(--muted-fg); font-variant-numeric: tabular-nums; }
+.pack-badge.ok {
+  font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  color: var(--primary-ink); background: var(--primary-soft, rgba(0, 200, 180, 0.12));
+}
+.pack-desc { font-size: 12px; color: var(--muted-fg); line-height: 1.5; }
+.pack-status { font-size: 11px; color: var(--muted-fg); font-variant-numeric: tabular-nums; }
+.pack-bar { height: 4px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.pack-bar span { display: block; height: 100%; background: var(--primary); transition: width 200ms linear; }
+.pack-actions { display: flex; gap: 8px; align-items: center; }

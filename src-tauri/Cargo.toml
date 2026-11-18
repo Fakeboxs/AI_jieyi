@@ -1,6 +1,6 @@
 [package]
 name = "jieyi"
-version = "0.5.0"
+version = "0.6.0"
 description = "截译 — 截图即译"
 edition = "2021"
 rust-version = "1.77"
@@ -17,7 +17,7 @@ base64 = "0.23.1"
 chrono = "0.4.45"
 futures-util = "0.3.34"
 image = { version = "0.25.6", features = ["png"] }
-reqwest = { version = "0.13.3", features = ["json", "stream"] }
+reqwest = { version = "0.13.3", features = ["json", "stream", "blocking"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -28,8 +28,19 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.20.0", features = ["v4"] }
+windows = { version = "0.62", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Globalization",
+    "Graphics_Imaging",
+    "Media_Ocr",
+    "Security_Cryptography",
+    "Storage_Streams",
+] }
+windows-future = "0.3"
 windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 xcap = "0.9.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [profile.release]
 codegen-units = 1

@@ -22,8 +22,9 @@
 22|
 23|| 文件 | 大小 | 适合 |
 24||---|---|---|
-25|| `JieYi_0.5.0_x64-setup.exe` | 4.0 MB | 推荐。当前用户安装（无需管理员），中文向导，缺 WebView2 自动下载 |
-26|| `JieYi-0.5.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
+| `JieYi_0.6.0_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
+| `JieYi-0.6.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
+| `JieYi-0.6.0-offline-win64.zip.001/.002` | 3.6 GB | **带资源包版**：解压即可断网翻译，不用再下载模型 |
 27|
 28|首次运行若被 SmartScreen 拦下：**更多信息 → 仍要运行**（安装包未做代码签名）。
 29|
@@ -74,7 +75,34 @@
 74|- 托盘：左键截图，右键菜单（截图翻译 / 重复上次区域 / 显示主窗口 / 退出）；菜单上的快捷键提示跟随你的改绑
 75|- 无遥测、无联网检查更新
 76|
-77|## 界面
+77|## 离线翻译（不用 API）
+
+不想把截图发给云端、或者机器根本不能联网时，可以在**本机**跑开源模型。设置 → 模型服务 → 服务商选「本地离线」，再选引擎：
+
+| 引擎 | 资源包 | 组成 | 适合 |
+|---|---|---|---|
+| **视觉模型**（推荐） | 2.8 GB | Qwen2.5-VL-3B Q4 + 视觉投影层 | 识图与翻译一步完成，公式、表格、排版保留最好 |
+| **轻量 OCR** | 1.1 GB | Windows 自带 OCR + Qwen2.5-1.5B | 没有独显也能跑，速度快，但只有纯文本（公式会丢） |
+
+两个引擎共用同一个 `llama.cpp` 运行时（Vulkan 版，约 40 MB，NVIDIA / AMD / Intel 都能用，没有显卡时自动回落 CPU），应用会在首次翻译时自己把它启动起来，退出应用时再关掉——不需要你开终端、装 Ollama。
+
+- **资源包一键下载**：设置里点「下载」，带进度条、断点续传与镜像（HuggingFace → hf-mirror，llama.cpp → gh-proxy），校验大小与 GGUF magic，坏包会自动重下。
+- **完全离线**：文件落在 `%APPDATA%\app.jieyi.desktop\models`，下载完之后拔网线也能用；把整个 `models` 目录拷到另一台机器同样有效。
+- **实测（RTX 5060 8GB，780×270 英文截图）**：视觉模型首字 1.7 s、整段 2.1 s；3B 占显存约 2.4 GB。CPU 也能跑，只是慢 3–5 倍。
+- **显存不够会自动报错**：错误里带上 `llama-server.log` 的尾部，直接告诉你是显存还是文件问题。
+
+> 质量提示：本地 3B 模型对长段落和密集公式不如云端大模型稳，术语偶尔选错（例如把 partition function 译成「分区函数」）。建议**联网时用 API、断网时自动兜底**，而不是二选一。
+>
+> 轻量引擎用的是 Windows 自带的 OCR，识别精度取决于系统语言包（设置 → 时间和语言 → 语言 → 可选功能 → OCR）；对英文会有零星空格与字母混淆，公式基本不保。
+
+### 两个发布版本
+
+- **联网版**（上面表格前两行）：~4 MB，模型按需下载，适合绝大多数人。
+- **带资源包版**（`offline-win64.zip.001/.002`）：3.6 GB，因为 GitHub 单文件上限 2 GB 才拆成两段；下载后 `copy /b JieYi-0.6.0-offline-win64.zip.001 + JieYi-0.6.0-offline-win64.zip.002 JieYi-0.6.0-offline-win64.zip` 合并再解压，里面已经含 `models/`，解压即用。
+
+自己打这个包：`python scripts/make_offline_bundle.py`（会从本机 `models` 目录取资源并自动分包）。
+
+## 界面
 78|
 79|| 选区旁的独立小窗 | 流式生成中（可随时停止） |
 80||---|---|
@@ -203,14 +231,14 @@
 203|
 204|| 文件 | 说明 |
 205||---|---|
-206|| `JieYi_0.5.0_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
-207|| `JieYi-0.5.0-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
+206|| `JieYi_0.6.0_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
+207|| `JieYi-0.6.0-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
 208|| `发布说明.md` / `SHA256SUMS.txt` | 面向用户的说明与校验和 |
 209|
 210|**未做代码签名**，分发时提醒用户：SmartScreen 提示 → 更多信息 → 仍要运行。要彻底消除需要签名证书：
 211|
 212|```powershell
-213|signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.5.0_x64-setup.exe
+213|signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.6.0_x64-setup.exe
 214|```
 215|
 216|> 改了 `productName`（当前为「截译」）会同时改变安装目录、快捷方式与「应用」里的显示名；`identifier` 保持不变，所以升级不会丢数据。

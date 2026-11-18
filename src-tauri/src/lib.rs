@@ -1,5 +1,8 @@
 mod capture;
 mod config;
+mod local;
+mod models;
+mod ocr;
 mod providers;
 mod store;
 
@@ -39,6 +42,8 @@ pub struct AppState {
     cancel: Mutex<Arc<AtomicBool>>,
     last_region: Mutex<Option<[f64; 4]>>,
     run: Mutex<RunSnapshot>,
+    /// llama-server sidecar for offline translation (None until first use)
+    local: Mutex<Option<local::LocalServer>>,
 }
 
 #[derive(serde::Deserialize, Clone, Copy)]
@@ -415,8 +420,77 @@ async fn translate_text(app: AppHandle, state: State<'_, AppState>, text: String
     Ok(())
 }
 
+/// Start the sidecar (or reuse a healthy one) and return its base URL.
+fn ensure_local(app: &AppHandle, engine: &str) -> Result<String, String> {
+    let st = app.state::<AppState>();
+    let mut guard = st.local.lock().unwrap();
+    if let Some(s) = guard.as_mut() {
+        let alive = s.child.try_wait().ok().flatten().is_none();
+        if alive && s.engine == engine {
+            return Ok(s.base_url());
+        }
+        s.stop();
+        *guard = None;
+    }
+    let server = local::start(app, &st.config_dir, engine)?;
+    let base = server.base_url();
+    *guard = Some(server);
+    Ok(base)
+}
+
 #[tauri::command]
-async fn test_connection(state: State<'_, AppState>, config: Config) -> Result<TestResult, String> {
+fn offline_status(state: State<'_, AppState>) -> Vec<models::PackInfo> {
+    models::status(&state.config_dir)
+}
+
+#[tauri::command]
+fn offline_languages() -> Vec<String> {
+    ocr::available_languages()
+}
+
+#[tauri::command]
+async fn download_pack(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let dir = state.config_dir.clone();
+    tauri::async_runtime::spawn_blocking(move || models::download(&app, &dir, &id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn delete_pack(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    models::delete(&state.config_dir, &id)
+}
+
+/// Free the VRAM without quitting the app.
+#[tauri::command]
+fn stop_local_engine(app: AppHandle) {
+    if let Some(mut s) = app.state::<AppState>().local.lock().unwrap().take() {
+        s.stop();
+    }
+    let _ = app.emit("offline:engine", serde_json::json!({ "state": "stopped" }));
+}
+
+#[tauri::command]
+async fn test_connection(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    config: Config,
+) -> Result<TestResult, String> {
+    if config.provider == "local" {
+        let engine = if config.offline_engine == "ocr" { "ocr" } else { "vlm" };
+        let started = std::time::Instant::now();
+        return match ensure_local(&app, engine) {
+            Ok(base) => Ok(TestResult {
+                ok: true,
+                message: format!(
+                    "本地引擎已就绪（{}，用时 {:.1}s）",
+                    base.trim_end_matches("/v1"),
+                    started.elapsed().as_secs_f32()
+                ),
+            }),
+            Err(e) => Ok(TestResult { ok: false, message: e }),
+        };
+    }
     let client = state.client.clone();
     match providers::probe(&client, &config).await {
         Ok(message) => Ok(TestResult { ok: true, message }),
@@ -664,9 +738,69 @@ async fn execute(
     cancel: Arc<AtomicBool>,
     target: &'static str,
 ) -> Result<providers::Translation, String> {
+    // ---- offline path -----------------------------------------------------
+    // With `provider = "local"` the request never leaves the machine: the
+    // sidecar is started from the downloaded pack and, for the lightweight
+    // engine, the image is turned into text by the Windows OCR engine first.
+    let mut off_cfg = cfg.clone();
+    let mut user_text = user_text;
+    let mut ocr_only = false;
+    // what the UI should say this run used (the wire config is rewritten below)
+    let display_provider = if cfg.provider == "local" { "本地".to_string() } else { cfg.provider.clone() };
+    let display_model = if cfg.provider == "local" {
+        if cfg.offline_engine == "ocr" {
+            "OCR + 1.5B".to_string()
+        } else {
+            "Qwen2.5-VL-3B".to_string()
+        }
+    } else {
+        cfg.model()
+    };
+    if cfg.provider == "local" {
+        let engine = if cfg.offline_engine == "ocr" { "ocr" } else { "vlm" };
+        let base = ensure_local(app, engine)?;
+        off_cfg.provider = "custom".into(); // OpenAI-compatible wire format
+        off_cfg.base_url = base;
+        off_cfg.api_key = "local".into();
+        off_cfg.model = "local".into();
+        off_cfg.thinking = "default".into();
+        if engine == "ocr" && !images.is_empty() {
+            let bytes: Vec<Vec<u8>> = images.iter().map(|e| e.bytes.clone()).collect();
+            let text = tauri::async_runtime::spawn_blocking(move || {
+                let mut chunks = Vec::new();
+                for b in &bytes {
+                    chunks.push(ocr::recognize_png(b)?);
+                }
+                Ok::<String, String>(chunks.join("\n\n"))
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+            if text.trim().is_empty() {
+                return Err("系统 OCR 没认出文字：截图太小或太模糊，或改用「视觉翻译包」".into());
+            }
+            user_text = Some(text);
+            ocr_only = true;
+        }
+    }
+    // Text-only runs (pasted text, or OCR output) must not keep telling the
+    // model to "translate the text in the image" — small local models happily
+    // continue the input instead of translating it.
+    if user_text.is_some() {
+        off_cfg.prompt = off_cfg
+            .prompt
+            .replace("图片中的", "下面的")
+            .replace("图片里", "下面")
+            .replace("图片中", "文本中");
+    }
+    let cfg = &off_cfg;
+
     let mime = images.first().map(|e| e.mime).unwrap_or("image/png");
     let kind = if user_text.is_some() { "text" } else { "image" };
-    let b64s: Vec<String> = images.iter().map(|e| base64_encode(&e.bytes)).collect();
+    let b64s: Vec<String> = if ocr_only {
+        Vec::new()
+    } else {
+        images.iter().map(|e| base64_encode(&e.bytes)).collect()
+    };
     let started_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -678,8 +812,8 @@ async fn execute(
         let mut run = st.run.lock().unwrap();
         *run = RunSnapshot {
             id: id.to_string(),
-            provider: cfg.provider.clone(),
-            model: cfg.model(),
+            provider: display_provider.clone(),
+            model: display_model.clone(),
             stream: cfg.stream,
             image_count: images.len(),
             target: target.to_string(),
@@ -693,8 +827,8 @@ async fn execute(
         "translation:start",
         serde_json::json!({
             "id": id,
-            "provider": cfg.provider,
-            "model": cfg.model(),
+            "provider": display_provider,
+            "model": display_model,
             "stream": cfg.stream,
             "image_count": images.len(),
             "target": target,
@@ -929,6 +1063,7 @@ pub fn run() {
                 cancel: Mutex::new(Arc::new(AtomicBool::new(false))),
                 last_region: Mutex::new(last_region),
                 run: Mutex::new(RunSnapshot::default()),
+                local: Mutex::new(None),
             });
 
             // Warm DNS/TLS so the first screenshot does not pay the handshake.
@@ -1025,8 +1160,21 @@ pub fn run() {
             translate_regions,
             translate_text,
             retranslate,
-            test_connection
+            test_connection,
+            offline_status,
+            download_pack,
+            delete_pack,
+            stop_local_engine,
+            offline_languages
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running jieyi");
+        .build(tauri::generate_context!())
+        .expect("error while building jieyi")
+        .run(|app, event| {
+            // The sidecar must not outlive the app (it holds ~3 GB of VRAM).
+            if matches!(event, tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }) {
+                if let Some(mut s) = app.state::<AppState>().local.lock().unwrap().take() {
+                    s.stop();
+                }
+            }
+        });
 }

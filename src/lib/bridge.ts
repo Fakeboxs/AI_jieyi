@@ -172,6 +172,70 @@ export async function onTranslationDone(cb: (payload: DonePayload) => void): Pro
   );
 }
 
+export type PackInfo = {
+  id: string;
+  title: string;
+  desc: string;
+  bytes: number;
+  installed: boolean;
+  present_bytes: number;
+  missing: string[];
+};
+
+export type OfflineProgress = {
+  id: string;
+  got: number;
+  total: number;
+  phase: "download" | "extract" | "done";
+  message: string;
+};
+
+export type OfflineEngineState = {
+  state: "loading" | "ready" | "error" | "stopped";
+  engine?: string;
+  port?: number;
+  message?: string;
+};
+
+export async function offlineStatus(): Promise<PackInfo[]> {
+  if (!inTauri) return [];
+  return call<PackInfo[]>("offline_status");
+}
+
+export async function downloadPack(id: string): Promise<void> {
+  if (!inTauri) return;
+  await call<void>("download_pack", { id });
+}
+
+export async function deletePack(id: string): Promise<void> {
+  if (!inTauri) return;
+  await call<void>("delete_pack", { id });
+}
+
+export async function stopLocalEngine(): Promise<void> {
+  if (!inTauri) return;
+  await call<void>("stop_local_engine");
+}
+
+export async function offlineLanguages(): Promise<string[]> {
+  if (!inTauri) return [];
+  return call<string[]>("offline_languages");
+}
+
+export async function onOfflineProgress(cb: (p: OfflineProgress) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const un = await listen<OfflineProgress>("offline:progress", (e) => cb(e.payload));
+  return un;
+}
+
+export async function onOfflineEngine(cb: (p: OfflineEngineState) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const un = await listen<OfflineEngineState>("offline:engine", (e) => cb(e.payload));
+  return un;
+}
+
 export async function onTranslationStart(cb: (payload: TranslationStart) => void): Promise<() => void> {
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");

@@ -1,7 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, Info, Moon, Plug, Save, Sun, Monitor } from "lucide-react";
 import type { Config, Provider } from "../types";
-import { listMonitors } from "../lib/bridge";
+import {
+  deletePack,
+  downloadPack,
+  listMonitors,
+  offlineLanguages,
+  offlineStatus,
+  onOfflineEngine,
+  onOfflineProgress,
+  stopLocalEngine,
+  type OfflineEngineState,
+  type PackInfo,
+} from "../lib/bridge";
 import { Section } from "./ui";
 
 const PRESETS: Record<Provider, { label: string; base: string; model: string; hint: string }> = {
@@ -28,6 +39,12 @@ const PRESETS: Record<Provider, { label: string; base: string; model: string; hi
     base: "http://127.0.0.1:8080/v1",
     model: "local-vlm",
     hint: "自定义端点按 OpenAI 兼容格式发送，适合自建服务或反向代理。",
+  },
+  local: {
+    label: "本地离线",
+    base: "",
+    model: "local",
+    hint: "在这台电脑上跑开源模型：先下载资源包，之后断网也能翻译。首次使用会自动加载模型（几秒到十几秒）。",
   },
   advanced: {
     label: "高级模板",
@@ -144,7 +161,11 @@ export function Settings({
           <span className="hint">{preset.hint}</span>
         </div>
 
-        <div className="field">
+        {draft.provider === "local" ? (
+          <OfflinePanel draft={draft} patch={patch} toast={toast} />
+        ) : null}
+
+        <div className="field" style={draft.provider === "local" ? { display: "none" } : undefined}>
           <label htmlFor="base-url">API 基础地址</label>
           <input
             id="base-url"
@@ -156,7 +177,7 @@ export function Settings({
           />
         </div>
 
-        <div className="field">
+        <div className="field" style={draft.provider === "local" ? { display: "none" } : undefined}>
           <label htmlFor="api-key">API Key</label>
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -176,7 +197,7 @@ export function Settings({
           <span className="hint">密钥只保存在本机的配置文件里，不会上传到任何第三方。</span>
         </div>
 
-        <div className="field">
+        <div className="field" style={draft.provider === "local" ? { display: "none" } : undefined}>
           <label htmlFor="model">模型名称</label>
           <input
             id="model"
@@ -663,5 +684,174 @@ export function HotkeyPicker({
         <span className="hotkey-hint">未设置</span>
       )}
     </button>
+  );
+}
+
+function human(bytes: number): string {
+  if (!bytes) return "0 MB";
+  return bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+}
+
+/** Everything about offline translation: packs, engine pick, sidecar state. */
+function OfflinePanel({
+  draft,
+  patch,
+  toast,
+}: {
+  draft: Config;
+  patch: (p: Partial<Config>) => void;
+  toast: (text: string, tone?: "default" | "error") => void;
+}) {
+  const [packs, setPacks] = useState<PackInfo[]>([]);
+  const [progress, setProgress] = useState<Record<string, { got: number; total: number; phase: string; message: string }>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [engine, setEngine] = useState<OfflineEngineState | null>(null);
+  const [langs, setLangs] = useState<string[]>([]);
+
+  const reload = useCallback(async () => {
+    try {
+      setPacks(await offlineStatus());
+    } catch {
+      setPacks([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+    offlineLanguages().then(setLangs).catch(() => setLangs([]));
+    const offs: (() => void)[] = [];
+    let gone = false;
+    onOfflineProgress((p) => {
+      setProgress((cur) => ({ ...cur, [p.id]: { got: p.got, total: p.total, phase: p.phase, message: p.message } }));
+      if (p.phase === "done") {
+        setBusy(null);
+        void reload();
+      }
+    }).then((fn) => (gone ? fn() : offs.push(fn)));
+    onOfflineEngine((p) => setEngine(p)).then((fn) => (gone ? fn() : offs.push(fn)));
+    return () => {
+      gone = true;
+      offs.forEach((fn) => fn());
+    };
+  }, [reload]);
+
+  async function start(id: string) {
+    setBusy(id);
+    try {
+      await downloadPack(id);
+      toast("资源包已就绪");
+    } catch (e) {
+      toast(`下载失败：${String(e)}`, "error");
+    } finally {
+      setBusy(null);
+      void reload();
+    }
+  }
+
+  async function remove(id: string) {
+    try {
+      await deletePack(id);
+      toast("已删除资源包");
+    } catch (e) {
+      toast(`删除失败：${String(e)}`, "error");
+    }
+    void reload();
+  }
+
+  const engineLabel = { loading: "正在加载模型…", ready: "本地模型已就绪", error: "本地模型出错", stopped: "本地模型已卸载" };
+
+  return (
+    <div className="offline-panel">
+      <div className="field">
+        <label>离线引擎</label>
+        <div className="segmented">
+          <button aria-pressed={draft.offline_engine !== "ocr"} onClick={() => patch({ offline_engine: "vlm" })}>
+            视觉模型（推荐）
+          </button>
+          <button aria-pressed={draft.offline_engine === "ocr"} onClick={() => patch({ offline_engine: "ocr" })}>
+            轻量 OCR
+          </button>
+        </div>
+        <span className="hint">
+          {draft.offline_engine === "ocr"
+            ? "先用 Windows 自带 OCR 认字，再交给小模型翻译：CPU 也能跑，但公式、表格、上下标会丢。"
+            : "视觉模型直接看图翻译，公式与排版保留得最好；需要下载约 2.8 GB。"}
+        </span>
+      </div>
+
+      <div className="field">
+        <label>资源包</label>
+        {packs.map((p) => {
+          const prog = progress[p.id];
+          const active = busy === p.id || (prog && prog.phase !== "done");
+          const pct = prog && prog.total > 0 ? Math.min(100, Math.round((prog.got / prog.total) * 100)) : 0;
+          return (
+            <div className="pack-row" key={p.id}>
+              <div className="pack-main">
+                <div className="pack-title">
+                  {p.title}
+                  <span className="pack-size">{human(p.bytes)}</span>
+                  {p.installed ? <span className="pack-badge ok">已就绪</span> : null}
+                </div>
+                <div className="pack-desc">{p.desc}</div>
+                {active ? (
+                  <>
+                    <div className="pack-bar">
+                      <span style={{ width: `${prog?.phase === "extract" ? 100 : pct}%` }} />
+                    </div>
+                    <div className="pack-status">
+                      {prog?.phase === "extract" ? "正在解压…" : `${pct}% · ${human(prog?.got ?? 0)} / ${human(prog?.total ?? p.bytes)}`}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+              <div className="pack-actions">
+                {p.installed ? (
+                  <button className="btn btn-ghost" onClick={() => void remove(p.id)} disabled={Boolean(busy)}>
+                    删除
+                  </button>
+                ) : (
+                  <button className="btn btn-primary" onClick={() => void start(p.id)} disabled={Boolean(busy)}>
+                    {busy === p.id ? "下载中…" : "下载"}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <span className="hint">
+          下载完成后文件在 <code>%APPDATA%\app.jieyi.desktop\models</code>，之后完全不需要联网；也可以把整个 models 目录拷到另一台机器直接用。
+        </span>
+      </div>
+
+      <div className="field">
+        <label>本地引擎状态</label>
+        <div className="pack-row">
+          <div className="pack-main">
+            <div className="pack-status">
+              {engine ? `${engineLabel[engine.state]}${engine.port ? `（端口 ${engine.port}）` : ""}${engine.message ? ` · ${engine.message}` : ""}` : "首次翻译时会自动启动"}
+            </div>
+            {draft.offline_engine === "ocr" ? (
+              <div className="pack-desc">
+                系统 OCR 语言：{langs.length ? langs.join("、") : "未检测到"}
+                {langs.length && !langs.some((l) => l.toLowerCase().startsWith("en")) ? (
+                  <span style={{ color: "var(--danger)", display: "block", marginTop: 4 }}>
+                    没有英文 OCR 模型：中文 OCR 认英文会出现「iguration」「乙过」这类乱码。请到 Windows 设置 → 时间和语言 → 语言 → 添加「English (United States)」→ 可选功能里勾选 OCR，装完重启本应用。
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+          <div className="pack-actions">
+            <button className="btn btn-ghost" onClick={() => void stopLocalEngine()} disabled={!engine || engine.state === "stopped"}>
+              卸载模型
+            </button>
+          </div>
+        </div>
+        <span className="hint">
+          「卸载模型」会把本地模型从显存/内存里退出，翻译时会自动重新加载；退出应用时也会自动退出。
+        </span>
+      </div>
+    </div>
   );
 }

@@ -51,6 +51,8 @@ pub struct Config {
     /// 全局快捷键（"Ctrl+Alt+S" 这样的写法）
     pub hotkey_capture: String,
     pub hotkey_repeat: String,
+    /// 离线引擎：off = 只用云端；vlm = 本地视觉模型；ocr = 系统 OCR + 小模型
+    pub offline_engine: String,
     pub advanced: Advanced,
 }
 
@@ -74,6 +76,7 @@ impl Default for Config {
             thinking: "off".into(),
             hotkey_capture: "Ctrl+Alt+S".into(),
             hotkey_repeat: "Ctrl+Alt+D".into(),
+            offline_engine: "off".into(),
             advanced: Advanced::default(),
         }
     }
