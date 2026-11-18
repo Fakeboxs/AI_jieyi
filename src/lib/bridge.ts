@@ -146,15 +146,24 @@ export async function onEntryOpen(cb: (id: string) => void): Promise<() => void>
   return listen<{ id: string }>("entry:open", (e) => cb(e.payload.id));
 }
 
-export async function onTranslationDone(
-  cb: (entryId: string, cancelled: boolean) => void,
-): Promise<() => void> {
+export interface DonePayload {
+  id: string;
+  cancelled: boolean;
+  ttft_ms: number;
+  elapsed_ms: number;
+}
+
+export async function onTranslationDone(cb: (payload: DonePayload) => void): Promise<() => void> {
   if (!inTauri) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
-  const un = await listen<{ id: string; cancelled?: boolean }>("translation:done", (e) =>
-    cb(e.payload.id, Boolean(e.payload.cancelled)),
+  return listen<Partial<DonePayload> & { id: string }>("translation:done", (e) =>
+    cb({
+      id: e.payload.id,
+      cancelled: Boolean(e.payload.cancelled),
+      ttft_ms: e.payload.ttft_ms ?? 0,
+      elapsed_ms: e.payload.elapsed_ms ?? 0,
+    }),
   );
-  return un;
 }
 
 export async function onTranslationStart(cb: (payload: TranslationStart) => void): Promise<() => void> {

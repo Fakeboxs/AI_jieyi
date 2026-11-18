@@ -18,6 +18,7 @@ export default function Popup() {
   const [copied, setCopied] = useState(false);
   const [entryId, setEntryId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [ttft, setTtft] = useState(0);
   const startedAt = useRef(0);
 
   useEffect(() => {
@@ -76,11 +77,19 @@ export default function Popup() {
         }),
       );
       await reg(
-        listen<{ id: string; cancelled?: boolean }>("translation:done", (e) => {
-          setBusy(false);
-          setEntryId(e.payload.id);
-          setElapsed(Math.max(0.1, Math.round((Date.now() - startedAt.current) / 100) / 10));
-        }),
+        listen<{ id: string; cancelled?: boolean; ttft_ms?: number; elapsed_ms?: number }>(
+          "translation:done",
+          (e) => {
+            setBusy(false);
+            setEntryId(e.payload.id);
+            setTtft(e.payload.ttft_ms ?? 0);
+            setElapsed(
+              e.payload.elapsed_ms
+                ? Math.round(e.payload.elapsed_ms / 100) / 10
+                : Math.max(0.1, Math.round((Date.now() - startedAt.current) / 100) / 10),
+            );
+          },
+        ),
       );
       await reg(
         listen<{ message: string }>("translation:error", (e) => {
@@ -117,6 +126,14 @@ export default function Popup() {
     };
   }, []);
 
+  // keep the "waiting" counter moving so the delay does not feel frozen
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (!busy) return;
+    const timer = window.setInterval(() => forceTick((v) => v + 1), 200);
+    return () => window.clearInterval(timer);
+  }, [busy]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -151,8 +168,18 @@ export default function Popup() {
           {label}
           {meta?.model ? ` · ${meta.model}` : ""}
         </span>
-        {busy ? <span className="spinner" /> : null}
-        {!busy && elapsed ? <span className="popup-meta">{`${elapsed}s`}</span> : null}
+        {busy ? (
+          <>
+            <span className="spinner" />
+            <span className="popup-meta">{`${((Date.now() - startedAt.current) / 1000).toFixed(1)}s`}</span>
+          </>
+        ) : null}
+        {!busy && elapsed ? (
+          <span className="popup-meta" title="首字到达 / 全部完成">
+            {ttft ? `首字 ${(ttft / 1000).toFixed(1)}s · ` : ""}
+            {`共 ${elapsed}s`}
+          </span>
+        ) : null}
         <div className="popup-tools">
           <button className="popup-tool" title="关闭 (Esc)" aria-label="关闭" onClick={() => void hidePopup()}>
             <X size={12} />

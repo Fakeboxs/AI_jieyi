@@ -8,6 +8,8 @@ use std::time::Instant;
 pub struct Translation {
     pub text: String,
     pub elapsed_ms: u64,
+    /// time until the first streamed character (0 for one-shot requests)
+    pub ttft_ms: u64,
     /// true when the user stopped the stream early
     pub cancelled: bool,
 }
@@ -109,10 +111,10 @@ fn api_error(status: reqwest::StatusCode, body: &str) -> String {
 }
 
 /// Substitute `{{…}}` placeholders inside an advanced-template string.
-fn render_template(tpl: &str, cfg: &Config, images_b64: &[String], stream: bool) -> String {
+fn render_template(tpl: &str, cfg: &Config, images_b64: &[String], mime: &str, stream: bool) -> String {
     let data_urls: Vec<String> = images_b64
         .iter()
-        .map(|b| format!("data:image/png;base64,{b}"))
+        .map(|b| format!("data:{mime};base64,{b}"))
         .collect();
     let images_json = serde_json::to_string(&data_urls).unwrap_or_else(|_| "[]".to_string());
     // OpenAI-style content parts, already comma-joined WITHOUT the outer array
@@ -162,6 +164,7 @@ fn build_request(
     client: &reqwest::Client,
     cfg: &Config,
     images_b64: &[String],
+    mime: &str,
     stream: bool,
 ) -> Result<reqwest::RequestBuilder, String> {
     if cfg.provider != "advanced" && cfg.api_key.trim().is_empty() {
@@ -182,7 +185,7 @@ fn build_request(
                 .map(|b| {
                     json!({
                         "type": "image",
-                        "source": { "type": "base64", "media_type": "image/png", "data": b }
+                        "source": { "type": "base64", "media_type": mime, "data": b }
                     })
                 })
                 .collect();
@@ -216,7 +219,7 @@ fn build_request(
             );
             let mut parts: Vec<Value> = images_b64
                 .iter()
-                .map(|b| json!({ "inline_data": { "mime_type": "image/png", "data": b } }))
+                .map(|b| json!({ "inline_data": { "mime_type": mime, "data": b } }))
                 .collect();
             parts.push(json!({ "text": cfg.prompt }));
             client.post(url).json(&json!({
@@ -232,13 +235,13 @@ fn build_request(
             if a.endpoint.trim().is_empty() {
                 return Err("高级模板还没填 endpoint（设置 → 高级 API）".into());
             }
-            let url = render_template(a.endpoint.trim(), cfg, images_b64, stream);
+            let url = render_template(a.endpoint.trim(), cfg, images_b64, mime, stream);
             let body_tpl = if a.body.trim().is_empty() {
                 ADVANCED_BODY_EXAMPLE.to_string()
             } else {
                 a.body.clone()
             };
-            let rendered = render_template(&body_tpl, cfg, images_b64, stream);
+            let rendered = render_template(&body_tpl, cfg, images_b64, mime, stream);
             let mut body: Value = serde_json::from_str(&rendered)
                 .map_err(|e| format!("模板渲染后的请求体不是合法 JSON：{e}"))?;
             // Streaming is decided by the app, not by the template: inject it only
@@ -252,7 +255,7 @@ fn build_request(
                 if h.key.trim().is_empty() {
                     continue;
                 }
-                req = req.header(h.key.trim(), render_template(&h.value, cfg, images_b64, stream));
+                req = req.header(h.key.trim(), render_template(&h.value, cfg, images_b64, mime, stream));
             }
             req.json(&body)
         }
@@ -263,7 +266,7 @@ fn build_request(
                 .map(|b| {
                     json!({
                         "type": "image_url",
-                        "image_url": { "url": format!("data:image/png;base64,{b}") }
+                        "image_url": { "url": format!("data:{mime};base64,{b}") }
                     })
                 })
                 .collect();
@@ -291,9 +294,10 @@ pub async fn translate(
     client: &reqwest::Client,
     cfg: &Config,
     images_b64: &[String],
+    mime: &str,
 ) -> Result<Translation, String> {
     let started = Instant::now();
-    let resp = build_request(client, cfg, images_b64, false)?
+    let resp = build_request(client, cfg, images_b64, mime, false)?
         .send()
         .await
         .map_err(|e| format!("请求失败：{e}"))?;
@@ -310,6 +314,7 @@ pub async fn translate(
     Ok(Translation {
         text: text.trim().to_string(),
         elapsed_ms: started.elapsed().as_millis() as u64,
+        ttft_ms: 0,
         cancelled: false,
     })
 }
@@ -320,11 +325,12 @@ pub async fn translate_stream<F: FnMut(&str)>(
     client: &reqwest::Client,
     cfg: &Config,
     images_b64: &[String],
+    mime: &str,
     cancel: Arc<AtomicBool>,
     mut on_delta: F,
 ) -> Result<Translation, String> {
     let started = Instant::now();
-    let resp = build_request(client, cfg, images_b64, true)?
+    let resp = build_request(client, cfg, images_b64, mime, true)?
         .send()
         .await
         .map_err(|e| format!("请求失败：{e}"))?;
@@ -339,6 +345,7 @@ pub async fn translate_stream<F: FnMut(&str)>(
     let mut buf = String::new();
     let mut out = String::new();
     let mut cancelled = false;
+    let mut ttft_ms = 0u64;
 
     'read: while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::Relaxed) {
@@ -368,6 +375,9 @@ pub async fn translate_stream<F: FnMut(&str)>(
                 }
                 if let Some(delta) = delta_text(&cfg.provider, &value) {
                     if !delta.is_empty() {
+                        if ttft_ms == 0 {
+                            ttft_ms = started.elapsed().as_millis() as u64;
+                        }
                         out.push_str(&delta);
                         on_delta(&delta);
                     }
@@ -386,6 +396,7 @@ pub async fn translate_stream<F: FnMut(&str)>(
     Ok(Translation {
         text: out.trim().to_string(),
         elapsed_ms: started.elapsed().as_millis() as u64,
+        ttft_ms,
         cancelled,
     })
 }

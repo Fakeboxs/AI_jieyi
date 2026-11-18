@@ -111,6 +111,47 @@ pub fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
+/// An image ready to be shipped to a model: bytes plus the MIME type that
+/// matches the chosen encoding.
+pub struct Encoded {
+    pub bytes: Vec<u8>,
+    pub mime: &'static str,
+}
+
+/// Prepare a screenshot for upload: shrink the long edge (image tokens and
+/// upload time scale with pixels) and pick whichever of PNG/JPEG is smaller so
+/// text stays crisp without paying for it.
+pub fn encode_for_model(image: &RgbaImage, max_edge: u32, quality: u8) -> Result<Encoded, String> {
+    let (w, h) = (image.width(), image.height());
+    let long = w.max(h);
+    let resized;
+    let src: &RgbaImage = if max_edge > 0 && long > max_edge {
+        let scale = max_edge as f32 / long as f32;
+        let nw = ((w as f32 * scale).round() as u32).max(1);
+        let nh = ((h as f32 * scale).round() as u32).max(1);
+        resized = image::imageops::resize(image, nw, nh, image::imageops::FilterType::Lanczos3);
+        &resized
+    } else {
+        image
+    };
+
+    let png = encode_png(src)?;
+
+    let mut jpg: Vec<u8> = Vec::new();
+    let rgb = image::DynamicImage::ImageRgba8(src.clone()).to_rgb8();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg, quality.clamp(50, 95));
+    encoder
+        .encode_image(&rgb)
+        .map_err(|e| format!("JPEG 编码失败：{e}"))?;
+
+    // Only trade sharpness for size when the win is meaningful.
+    if jpg.len() + 4096 < png.len() {
+        Ok(Encoded { bytes: jpg, mime: "image/jpeg" })
+    } else {
+        Ok(Encoded { bytes: png, mime: "image/png" })
+    }
+}
+
 pub fn encode_png_b64(image: &RgbaImage) -> Result<String, String> {
     let buf = encode_png(image)?;
     Ok(base64::engine::general_purpose::STANDARD.encode(buf))

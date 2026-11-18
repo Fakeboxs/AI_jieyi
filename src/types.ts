@@ -42,6 +42,10 @@ export interface Config {
   remember_region: boolean;
   /** "popup" = 选区旁的独立小窗；"main" = 回到主窗口 */
   result_window: "popup" | "main";
+  /** 上传前把长边缩到多少像素（0 = 不缩放） */
+  image_max_edge: number;
+  /** 需要压成 JPEG 时的质量 50–95 */
+  image_quality: number;
   advanced: AdvancedConfig;
 }
 

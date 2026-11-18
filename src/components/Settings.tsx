@@ -414,6 +414,37 @@ export function Settings({
             独立小窗是窄边、置顶的浮窗，出现在选区旁边，不会把主窗口拉到前台；按 Esc 或右上角 × 可关闭。
           </span>
         </div>
+        <div className="field">
+          <label htmlFor="img-edge">上传给模型的图片（长边上限）</label>
+          <select
+            id="img-edge"
+            className="select"
+            value={draft.image_max_edge}
+            onChange={(e) => patch({ image_max_edge: Number(e.target.value) })}
+          >
+            <option value={0}>不缩放（最清晰，最慢）</option>
+            <option value={1920}>1920px</option>
+            <option value={1440}>1440px（推荐）</option>
+            <option value={1280}>1280px</option>
+            <option value={1024}>1024px（最快）</option>
+          </select>
+          <span className="hint">
+            模型按像素计费、也按像素等待：边长减半 ≈ 图片 token 降到 1/4。文字截图 1280–1440px 仍然清晰。
+          </span>
+        </div>
+        <div className="field">
+          <label htmlFor="img-quality">JPEG 质量（{draft.image_quality}）</label>
+          <input
+            id="img-quality"
+            type="range"
+            min={60}
+            max={95}
+            step={1}
+            value={draft.image_quality}
+            onChange={(e) => patch({ image_quality: Number(e.target.value) })}
+          />
+          <span className="hint">只在 JPEG 比 PNG 更小时才会采用；文字截图通常仍走 PNG。</span>
+        </div>
         <div className="hint-strip">
           <span>重复上次区域（不弹选区，直接翻译）</span>
           <span className="kbd">

@@ -134,7 +134,7 @@ export default function App() {
     );
 
     reg(
-      onTranslationDone(async (id, cancelled) => {
+      onTranslationDone(async ({ id, cancelled }) => {
         window.clearTimeout(streamBuf.current.timer);
         if (popupTarget.current) {
           // keep the archive in sync, but leave the visible window alone

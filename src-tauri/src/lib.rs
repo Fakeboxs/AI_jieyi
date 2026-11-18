@@ -195,10 +195,13 @@ async fn translate_regions(
         .take()
         .ok_or_else(|| "没有待处理的截图".to_string())?;
 
+    let cfg_now = state.cfg.lock().unwrap().clone();
     let mut pngs: Vec<Vec<u8>> = Vec::new();
+    let mut send: Vec<capture::Encoded> = Vec::new();
     for r in &rects {
         let img = capture::crop(&shot, r.x, r.y, r.w, r.h)?;
         pngs.push(capture::encode_png(&img)?);
+        send.push(capture::encode_for_model(&img, cfg_now.image_max_edge, cfg_now.image_quality)?);
     }
     if let Some(first) = rects.first() {
         if state.cfg.lock().unwrap().remember_region {
@@ -238,7 +241,7 @@ async fn translate_regions(
     *state.cancel.lock().unwrap() = cancel.clone();
 
     tauri::async_runtime::spawn(async move {
-        match execute(&handle, &client, &cfg, pngs.clone(), &id, cancel, target).await {
+        match execute(&handle, &client, &cfg, send, &id, cancel, target).await {
             Ok(result) => {
                 let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
                 let stored = {
@@ -259,7 +262,13 @@ async fn translate_regions(
                     Ok(()) => {
                         let _ = handle.emit(
                             "translation:done",
-                            serde_json::json!({ "id": id, "cancelled": result.cancelled, "target": target }),
+                            serde_json::json!({
+                                "id": id,
+                                "cancelled": result.cancelled,
+                                "target": target,
+                                "ttft_ms": result.ttft_ms,
+                                "elapsed_ms": result.elapsed_ms,
+                            }),
                         );
                         if target != "popup" {
                             focus_main(&handle);
@@ -287,24 +296,27 @@ async fn retranslate(app: AppHandle, state: State<'_, AppState>, id: String) -> 
         .get(&id)?
         .ok_or_else(|| "找不到这条记录".to_string())?;
     let images_dir = state.store.lock().unwrap().images_dir().to_path_buf();
-    let mut pngs: Vec<Vec<u8>> = Vec::new();
+    let cfg = state.cfg.lock().unwrap().clone();
+    let mut send: Vec<capture::Encoded> = Vec::new();
     for rel in &entry.images {
         let name = rel.trim_start_matches("images/");
         let path = images_dir.join(name);
         let bytes = std::fs::read(&path).map_err(|e| format!("读取截图失败：{e}"))?;
-        pngs.push(bytes);
+        let img = image::load_from_memory(&bytes)
+            .map_err(|e| format!("截图解码失败：{e}"))?
+            .to_rgba8();
+        send.push(capture::encode_for_model(&img, cfg.image_max_edge, cfg.image_quality)?);
     }
-    if pngs.is_empty() {
+    if send.is_empty() {
         return Err("这条记录没有可用的截图".into());
     }
-    let cfg = state.cfg.lock().unwrap().clone();
     let client = state.client.clone();
     let handle = app.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     *state.cancel.lock().unwrap() = cancel.clone();
 
     tauri::async_runtime::spawn(async move {
-        match execute(&handle, &client, &cfg, pngs, &id, cancel, "main").await {
+        match execute(&handle, &client, &cfg, send, &id, cancel, "main").await {
             Ok(result) => {
                 let saved = {
                     let st = handle.state::<AppState>();
@@ -521,12 +533,13 @@ async fn execute(
     app: &AppHandle,
     client: &reqwest::Client,
     cfg: &Config,
-    pngs: Vec<Vec<u8>>,
+    images: Vec<capture::Encoded>,
     id: &str,
     cancel: Arc<AtomicBool>,
     target: &'static str,
 ) -> Result<providers::Translation, String> {
-    let b64s: Vec<String> = pngs.iter().map(|b| base64_encode(b)).collect();
+    let mime = images.first().map(|e| e.mime).unwrap_or("image/png");
+    let b64s: Vec<String> = images.iter().map(|e| base64_encode(&e.bytes)).collect();
     let started_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -541,7 +554,7 @@ async fn execute(
             provider: cfg.provider.clone(),
             model: cfg.model(),
             stream: cfg.stream,
-            image_count: pngs.len(),
+            image_count: images.len(),
             target: target.to_string(),
             text: String::new(),
             done: false,
@@ -555,7 +568,7 @@ async fn execute(
             "provider": cfg.provider,
             "model": cfg.model(),
             "stream": cfg.stream,
-            "image_count": pngs.len(),
+            "image_count": images.len(),
             "target": target,
         }),
     );
@@ -563,7 +576,7 @@ async fn execute(
     if cfg.stream {
         let handle = app.clone();
         let stream_id = id.to_string();
-        let result = providers::translate_stream(client, cfg, &b64s, cancel, move |delta| {
+        let result = providers::translate_stream(client, cfg, &b64s, mime, cancel, move |delta| {
             {
                 let st = handle.state::<AppState>();
                 let mut run = st.run.lock().unwrap();
@@ -578,7 +591,7 @@ async fn execute(
         finish_run(app, &result);
         result
     } else {
-        let result = providers::translate(client, cfg, &b64s).await;
+        let result = providers::translate(client, cfg, &b64s, mime).await;
         finish_run(app, &result);
         result
     }
@@ -649,6 +662,14 @@ fn trigger_repeat(app: &AppHandle) {
                 return;
             }
         };
+        let cfg_for_send = handle.state::<AppState>().cfg.lock().unwrap().clone();
+        let send = match capture::encode_for_model(&cropped, cfg_for_send.image_max_edge, cfg_for_send.image_quality) {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = handle.emit("translation:error", serde_json::json!({ "message": e }));
+                return;
+            }
+        };
         let st = handle.state::<AppState>();
         let cfg = st.cfg.lock().unwrap().clone();
         let target = result_target(&cfg);
@@ -667,7 +688,7 @@ fn trigger_repeat(app: &AppHandle) {
         let cancel = Arc::new(AtomicBool::new(false));
         *st.cancel.lock().unwrap() = cancel.clone();
 
-        match execute(&handle, &client, &cfg, vec![png.clone()], &id, cancel, target).await {
+        match execute(&handle, &client, &cfg, vec![send], &id, cancel, target).await {
             Ok(result) => {
                 let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
                 let stored = {
@@ -759,6 +780,24 @@ pub fn run() {
                 last_region: Mutex::new(last_region),
                 run: Mutex::new(RunSnapshot::default()),
             });
+
+            // Warm DNS/TLS so the first screenshot does not pay the handshake.
+            {
+                let warm_client = app.state::<AppState>().client.clone();
+                let warm_cfg = app.state::<AppState>().cfg.lock().unwrap().clone();
+                tauri::async_runtime::spawn(async move {
+                    if warm_cfg.api_key.trim().is_empty() || warm_cfg.base_url.trim().is_empty() {
+                        return;
+                    }
+                    let url = format!("{}/models", warm_cfg.trimmed_base());
+                    let _ = warm_client
+                        .get(url)
+                        .header("authorization", format!("Bearer {}", warm_cfg.api_key.trim()))
+                        .timeout(std::time::Duration::from_secs(6))
+                        .send()
+                        .await;
+                });
+            }
 
             // global hotkeys: Ctrl+Alt+S 截图, Ctrl+Alt+D 重复上次区域
             let capture_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);

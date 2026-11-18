@@ -22,6 +22,8 @@ export const MOCK_CONFIG: Config = {
   capture_screen: -1,
   remember_region: true,
   result_window: "popup",
+  image_max_edge: 1440,
+  image_quality: 86,
   advanced: { endpoint: "", headers: [], body: "", response_path: "" },
 };
 

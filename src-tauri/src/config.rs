@@ -41,6 +41,10 @@ pub struct Config {
     pub remember_region: bool,
     /// "popup" = 在选区旁边弹一个窄的独立小窗；"main" = 回到主窗口
     pub result_window: String,
+    /// 上传给模型前把长边缩到这个像素以内（0 = 不缩放）。越小越快。
+    pub image_max_edge: u32,
+    /// 需要压成 JPEG 时的质量（50–95）
+    pub image_quality: u8,
     pub advanced: Advanced,
 }
 
@@ -59,6 +63,8 @@ impl Default for Config {
             capture_screen: -1,
             remember_region: true,
             result_window: "popup".into(),
+            image_max_edge: 1440,
+            image_quality: 86,
             advanced: Advanced::default(),
         }
     }
