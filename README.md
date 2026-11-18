@@ -8,7 +8,7 @@ Rust + Tauri 2 外壳，React 19 + TypeScript 前端。是 `AI-Screenshot-Transl
 Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公式 / 表格）→  复制 / 导出
 ```
 
-[![Release](https://img.shields.io/github/v/release/Fakeboxs/jieyi?include_prereleases&label=release)](https://github.com/Fakeboxs/jieyi/releases)
+[![Release](https://img.shields.io/github/v/release/Fakeboxs/AI_jieyi?include_prereleases&label=release)](https://github.com/Fakeboxs/AI_jieyi/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0d9488)](#系统要求)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app)
@@ -18,7 +18,7 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 
 ## 下载
 
-到 [Releases](https://github.com/Fakeboxs/jieyi/releases/latest) 下载：
+到 [Releases](https://github.com/Fakeboxs/AI_jieyi/releases/latest) 下载：
 
 | 文件 | 大小 | 适合 |
 |---|---|---|
