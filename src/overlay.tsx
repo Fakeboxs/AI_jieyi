@@ -207,7 +207,8 @@ export default function Overlay() {
         </div>
       ))}
 
-      <div className="overlay-tips">
+      {/* stopPropagation: clicking a control must not start a new selection */}
+      <div className="overlay-tips" onPointerDown={(e) => e.stopPropagation()}>
         {busy ? (
           <>
             <span className="spinner" />
@@ -215,17 +216,28 @@ export default function Overlay() {
           </>
         ) : (
           <>
-            <span>拖动框选，可连续框多块</span>
-            <span>
-              <kbd>Enter</kbd> 翻译 {regions.length > 0 ? `${regions.length} 块` : ""}
+            <span className="overlay-hint">拖动框选，可连续框多块</span>
+            <button
+              className="btn btn-primary overlay-btn"
+              disabled={regions.length === 0}
+              onClick={() => void submit(regions)}
+            >
+              翻译{regions.length > 0 ? ` ${regions.length} 块` : ""}
+            </button>
+            <button className="btn btn-ghost overlay-btn" onClick={() => void cancelOverlay()}>
+              取消
+            </button>
+            <button
+              className="btn btn-ghost overlay-btn"
+              disabled={regions.length === 0}
+              onClick={() => setRegions((cur) => cur.slice(0, -1))}
+            >
+              撤销
+            </button>
+            <span className="overlay-keys">
+              <kbd>Enter</kbd> 翻译 · <kbd>Backspace</kbd> 撤销 · <kbd>Esc</kbd> 取消
             </span>
-            <span>
-              <kbd>Backspace</kbd> 撤销
-            </span>
-            <span>
-              <kbd>Esc</kbd> 取消
-            </span>
-            {shotSize ? <span>{`${shotSize.width} × ${shotSize.height}`}</span> : null}
+            {shotSize ? <span className="overlay-size">{`${shotSize.width} × ${shotSize.height}`}</span> : null}
           </>
         )}
       </div>

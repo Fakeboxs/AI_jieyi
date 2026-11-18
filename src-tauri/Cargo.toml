@@ -1,6 +1,6 @@
 [package]
 name = "jieyi"
-version = "0.2.1"
+version = "0.2.2"
 description = "截译 — 截图即译"
 edition = "2021"
 rust-version = "1.77"
@@ -25,6 +25,7 @@ tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 uuid = { version = "1.20.0", features = ["v4"] }
 windows-sys = { version = "0.61.2", features = ["Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }

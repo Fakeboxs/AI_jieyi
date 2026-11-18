@@ -17,14 +17,21 @@ OUT.mkdir(exist_ok=True)
 # only refresh the artifacts, keep the hand-written release notes
 INSTALLER_NAME = f"JieYi_{VERSION}_x64-setup.exe"
 PORTABLE_NAME = f"JieYi-{VERSION}-portable-win64.zip"
+def drop(path: Path) -> None:
+    """Delete an artifact, tolerating a file someone has open (e.g. a running portable copy)."""
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    except PermissionError:
+        print(f"skip (in use): {path.name}")
+
 for name in (INSTALLER_NAME, PORTABLE_NAME, "SHA256SUMS.txt"):
-    target = OUT / name
-    if target.exists():
-        target.unlink()
+    drop(OUT / name)
 # drop artifacts from older versions so the folder only ever holds one release
 for stale in list(OUT.glob("JieYi_*_x64-setup.exe")) + list(OUT.glob("JieYi-*-portable-win64.zip")):
     if stale.name not in (INSTALLER_NAME, PORTABLE_NAME):
-        stale.unlink()
+        drop(stale)
 
 # match the version explicitly: older installers stay in the bundle dir after upgrades
 installer_src = next(NSIS.glob(f"*_{VERSION}_x64-setup.exe"))

@@ -314,11 +314,39 @@ fn load_last_region(dir: &std::path::Path) -> Option<[f64; 4]> {
     ])
 }
 
+/// Closing the window must not kill the shell: hide it instead, so the hotkey
+/// still has somewhere to put the translation.
+fn attach_close_to_tray(win: &tauri::WebviewWindow) {
+    let handle = win.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = handle.hide();
+        }
+    });
+}
+
 fn focus_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.show();
         let _ = win.unminimize();
+        let _ = win.show();
         let _ = win.set_focus();
+        return;
+    }
+    // No window at all (older builds destroyed it): rebuild it rather than
+    // silently swallowing the event.
+    match tauri::WebviewWindowBuilder::new(app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("截译")
+        .inner_size(1120.0, 780.0)
+        .min_inner_size(940.0, 620.0)
+        .center()
+        .build()
+    {
+        Ok(win) => {
+            attach_close_to_tray(&win);
+            let _ = win.set_focus();
+        }
+        Err(e) => eprintln!("rebuild main window failed: {e}"),
     }
 }
 
@@ -334,6 +362,7 @@ fn show_overlay(app: &AppHandle, monitor: capture::Rect, scale: f64) -> Result<(
     if let Some(win) = app.get_webview_window("overlay") {
         let _ = win.set_size(tauri::LogicalSize::new(w, h));
         let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+        let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
         let _ = win.emit("shot:refresh", ());
@@ -498,6 +527,11 @@ fn trigger_repeat(app: &AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // A second launch should surface the running copy instead of starting a
+        // rival process that cannot register the global hotkeys.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_main(app);
+        }))
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -602,6 +636,7 @@ pub fn run() {
 
             // The window is only a shell; the UI renders from the bundled frontend.
             if let Some(win) = app.get_webview_window("main") {
+                attach_close_to_tray(&win);
                 let _ = win.show();
             }
             Ok(())
