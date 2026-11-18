@@ -22,8 +22,8 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 
 | 文件 | 大小 | 适合 |
 |---|---|---|
-| `JieYi_0.6.1_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
-| `JieYi-0.6.1-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
+| `JieYi_0.7.0_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
+| `JieYi-0.7.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
 | 离线模型（不入库） | 39 MB / 2.8 GB / 1.1 GB | **资源包不随发布上传**，按下表链接自行下载，见「离线翻译」一节的目录结构 |
 
 首次运行若被 SmartScreen 拦下：**更多信息 → 仍要运行**（安装包未做代码签名）。
@@ -123,13 +123,28 @@ models/
 
 ## 界面
 
-| 选区旁的独立小窗 | 流式生成中（可随时停止） |
+| 框选：Facebook 蓝描边 + 圆角 + 四角手柄 | 选区旁的译文浮窗（圆角卡片 + 阴影） |
 |---|---|
-| ![小窗](docs/screenshots/popup.png) | ![流式](docs/screenshots/streaming.png) |
+| ![框选](docs/screenshots/overlay.png) | ![浮窗](docs/screenshots/popup.png) |
 
-| 高级 API 模板 | 归档 |
+| 结果页 · 深色 | 结果页 · 浅色 |
 |---|---|
-| ![设置](docs/screenshots/settings-advanced.png) | ![归档](docs/screenshots/archive.png) |
+| ![深色](docs/screenshots/result-dark.png) | ![浅色](docs/screenshots/result-light.png) |
+
+![设置](docs/screenshots/settings.png)
+
+## 视觉与动效
+
+界面照 Meta / Facebook（Comet）的设计语言重做过：
+
+- **配色**：Facebook 蓝 `#1877F2` 作唯一强调色，画布 `#F0F2F5`、卡片纯白、分隔线 `#CED0D4`；深色模式用 FB 的 `#18191A / #242526 / #3A3B3C` 一套。
+- **形状**：卡片 12–14 px 圆角，按钮 8 px，分段控件与浮层按钮走胶囊形，选中态用 `#E7F3FF` 蓝色淡底而不是描边。
+- **层级**：`0 1px 2px` 的贴地阴影给卡片，弹层用 `0 12px 28px` 双层阴影；浮窗是透明窗口 + 卡片阴影，所以边缘是真的圆角。
+- **动效**（100 / 180 / 260 ms + `cubic-bezier(.08,.52,.52,1)`，弹入用回弹曲线 `cubic-bezier(.34,1.56,.64,1)`）：
+  - 框选：遮罩淡入、截图轻微推近、选区 0.985→1 弹入、尺寸胶囊从下往上浮、四角手柄缩放进场、底部工具条整体弹入；
+  - 浮窗：卡片 0.965→1 弹入，标题栏状态点呼吸（生成中蓝色脉动，完成变绿），骨架屏流光扫描；
+  - 全局：按钮 `:active` 缩到 0.965、导航项图标回弹、toast 从下方弹入、滚动条细圆角。
+- **可达性**：`prefers-reduced-motion` 下一律降到 0.01 ms；焦点用蓝色柔光环而不是 outline。
 
 ## 系统要求
 
@@ -250,14 +265,14 @@ python scripts/make_release.py         # 汇总 dist-release：安装包 + 便�
 
 | 文件 | 说明 |
 |---|---|
-| `JieYi_0.6.1_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
-| `JieYi-0.6.1-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
+| `JieYi_0.7.0_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
+| `JieYi-0.7.0-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
 | `发布说明.md` / `SHA256SUMS.txt` | 面向用户的说明与校验和 |
 
 **未做代码签名**，分发时提醒用户：SmartScreen 提示 → 更多信息 → 仍要运行。要彻底消除需要签名证书：
 
 ```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.6.1_x64-setup.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.7.0_x64-setup.exe
 ```
 
 > 改了 `productName`（当前为「截译」）会同时改变安装目录、快捷方式与「应用」里的显示名；`identifier` 保持不变，所以升级不会丢数据。

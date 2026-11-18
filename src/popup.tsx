@@ -168,7 +168,7 @@ export default function Popup() {
   const label = meta ? (meta.provider === "openai" ? "OpenAI 兼容" : meta.provider) : "";
 
   return (
-    <div className="popup-root">
+    <div className="popup-root" data-busy={busy ? "true" : "false"}>
       <header className="popup-bar" data-tauri-drag-region>
         <span className="popup-dot" data-tauri-drag-region />
         <span className="popup-title" data-tauri-drag-region>

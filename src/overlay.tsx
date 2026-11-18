@@ -183,11 +183,11 @@ export default function Overlay() {
           <mask id="cut">
             <rect x={0} y={0} width={vw} height={vh} fill="white" />
             {all.map((r, i) => (
-              <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} fill="black" />
+              <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={6} fill="black" />
             ))}
           </mask>
         </defs>
-        <rect x={0} y={0} width={vw} height={vh} fill="rgba(3,16,18,0.55)" mask="url(#cut)" />
+        <rect x={0} y={0} width={vw} height={vh} fill="rgba(0,0,0,0.5)" mask="url(#cut)" />
       </svg>
 
       {all.map((r, i) => (
@@ -204,6 +204,14 @@ export default function Overlay() {
           style={{ left: r.x, top: r.y, width: r.w, height: r.h }}
         >
           <span className="overlay-idx">{i + 1}</span>
+          {i === all.length - 1 ? (
+            <>
+              <span className="overlay-handle" data-pos="nw" />
+              <span className="overlay-handle" data-pos="ne" />
+              <span className="overlay-handle" data-pos="sw" />
+              <span className="overlay-handle" data-pos="se" />
+            </>
+          ) : null}
         </div>
       ))}
 

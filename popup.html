@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>截译 · 译文</title>
+    <style>
+      /* the window is created with transparent(true): nothing may paint a
+         rectangle behind the card, or the rounded corners turn into a
+         square shadow. */
+      html, body { margin: 0; height: 100%; background: transparent !important; overflow: hidden; }
+      #root { height: 100%; }
+    </style>
   </head>
   <body class="popup-body-host">
     <div id="root"></div>
