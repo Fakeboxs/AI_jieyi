@@ -12,7 +12,7 @@ use store::{Entry, Store};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 /// Everything the popup needs to repaint itself if it mounts mid-run.
 #[derive(Clone, serde::Serialize, Default)]
@@ -23,6 +23,7 @@ pub struct RunSnapshot {
     pub stream: bool,
     pub image_count: usize,
     pub target: String,
+    pub kind: String,
     pub text: String,
     pub done: bool,
     pub started_ms: u64,
@@ -56,9 +57,17 @@ fn get_config(state: State<'_, AppState>) -> Config {
 }
 
 #[tauri::command]
-fn save_config(state: State<'_, AppState>, config: Config) -> Result<Config, String> {
-    config.save(&state.config_dir)?;
+fn save_config(app: AppHandle, state: State<'_, AppState>, config: Config) -> Result<Config, String> {
+    let previous = state.cfg.lock().unwrap().clone();
+    // Register the new hotkeys before touching disk: a conflict must not leave
+    // the app with no working shortcut.
+    apply_hotkeys(&app, &config)?;
+    if let Err(e) = config.save(&state.config_dir) {
+        let _ = apply_hotkeys(&app, &previous);
+        return Err(e);
+    }
     *state.cfg.lock().unwrap() = config.clone();
+    refresh_tray_menu(&app, &config);
     Ok(config)
 }
 
@@ -241,7 +250,7 @@ async fn translate_regions(
     *state.cancel.lock().unwrap() = cancel.clone();
 
     tauri::async_runtime::spawn(async move {
-        match execute(&handle, &client, &cfg, send, &id, cancel, target).await {
+        match execute(&handle, &client, &cfg, send, None, &id, cancel, target).await {
             Ok(result) => {
                 let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
                 let stored = {
@@ -316,7 +325,7 @@ async fn retranslate(app: AppHandle, state: State<'_, AppState>, id: String) -> 
     *state.cancel.lock().unwrap() = cancel.clone();
 
     tauri::async_runtime::spawn(async move {
-        match execute(&handle, &client, &cfg, send, &id, cancel, "main").await {
+        match execute(&handle, &client, &cfg, send, None, &id, cancel, "main").await {
             Ok(result) => {
                 let saved = {
                     let st = handle.state::<AppState>();
@@ -338,6 +347,68 @@ async fn retranslate(app: AppHandle, state: State<'_, AppState>, id: String) -> 
             }
             Err(message) => {
                 let _ = handle.emit("translation:error", serde_json::json!({ "message": message }));
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Manual translation: the user pastes text instead of taking a screenshot.
+#[tauri::command]
+async fn translate_text(app: AppHandle, state: State<'_, AppState>, text: String) -> Result<(), String> {
+    let body = text.trim().to_string();
+    if body.is_empty() {
+        return Err("先粘贴或输入要翻译的文本".into());
+    }
+    if body.chars().count() > 20_000 {
+        return Err("文本太长了（上限约 2 万字符），分段翻译更快".into());
+    }
+    let cfg = state.cfg.lock().unwrap().clone();
+    let client = state.client.clone();
+    let handle = app.clone();
+    let id = uuid::Uuid::new_v4().to_string();
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.cancel.lock().unwrap() = cancel.clone();
+
+    tauri::async_runtime::spawn(async move {
+        match execute(&handle, &client, &cfg, Vec::new(), Some(body), &id, cancel, "main").await {
+            Ok(result) => {
+                let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+                let stored = {
+                    let st = handle.state::<AppState>();
+                    let outcome = st.store.lock().unwrap().insert(
+                        &id,
+                        &ts,
+                        &cfg.prompt,
+                        &result.text,
+                        &cfg.provider,
+                        &cfg.model(),
+                        result.elapsed_ms,
+                        &[] as &[Vec<u8>],
+                    );
+                    outcome
+                };
+                match stored {
+                    Ok(()) => {
+                        let _ = handle.emit(
+                            "translation:done",
+                            serde_json::json!({
+                                "id": id,
+                                "cancelled": result.cancelled,
+                                "target": "main",
+                                "kind": "text",
+                                "ttft_ms": result.ttft_ms,
+                                "elapsed_ms": result.elapsed_ms,
+                            }),
+                        );
+                    }
+                    Err(m) => {
+                        let _ = handle.emit("translation:error", serde_json::json!({ "message": m }));
+                    }
+                }
+            }
+            Err(m) => {
+                let _ = handle.emit("translation:error", serde_json::json!({ "message": m }));
             }
         }
     });
@@ -405,6 +476,60 @@ fn attach_close_to_tray(win: &tauri::WebviewWindow) {
             let _ = handle.hide();
         }
     });
+}
+
+fn parse_hotkeys(cfg: &Config) -> Result<(Shortcut, Shortcut), String> {
+    let cap = cfg.hotkey_capture.trim();
+    let rep = cfg.hotkey_repeat.trim();
+    let cap_key: Shortcut = cap
+        .parse()
+        .map_err(|_| format!("截图快捷键「{cap}」无法识别（示例：Ctrl+Alt+S）"))?;
+    let rep_key: Shortcut = rep
+        .parse()
+        .map_err(|_| format!("重复区域快捷键「{rep}」无法识别（示例：Ctrl+Alt+D）"))?;
+    if cap_key == rep_key {
+        return Err("两个功能不能绑定同一个快捷键".into());
+    }
+    Ok((cap_key, rep_key))
+}
+
+/// (Re)register both global hotkeys. Any conflict is reported to the caller so
+/// the settings dialog can show it instead of silently losing the shortcut.
+fn apply_hotkeys(app: &AppHandle, cfg: &Config) -> Result<(), String> {
+    let (cap, rep) = parse_hotkeys(cfg)?;
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    gs.register(cap).map_err(|e| {
+        format!(
+            "「{}」注册失败：可能已被其它程序占用（{e}）",
+            cfg.hotkey_capture
+        )
+    })?;
+    gs.register(rep).map_err(|e| {
+        let _ = gs.unregister(cap);
+        format!(
+            "「{}」注册失败：可能已被其它程序占用（{e}）",
+            cfg.hotkey_repeat
+        )
+    })?;
+    Ok(())
+}
+
+fn build_tray_menu(app: &AppHandle, cfg: &Config) -> tauri::Result<Menu<tauri::Wry>> {
+    let shot_item = MenuItem::with_id(app, "shot", "截图翻译", true, Some(cfg.hotkey_capture.as_str()))?;
+    let repeat_item = MenuItem::with_id(app, "repeat", "重复上次区域", true, Some(cfg.hotkey_repeat.as_str()))?;
+    let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
+    let sep = PredefinedMenuItem::separator(app)?;
+    let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+    Menu::with_items(app, &[&shot_item, &repeat_item, &show_item, &sep, &quit_item])
+}
+
+fn refresh_tray_menu(app: &AppHandle, cfg: &Config) {
+    if let Some(tray) = app.tray_by_id("main") {
+        if let Ok(menu) = build_tray_menu(app, cfg) {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
 }
 
 fn focus_main(app: &AppHandle) {
@@ -534,11 +659,13 @@ async fn execute(
     client: &reqwest::Client,
     cfg: &Config,
     images: Vec<capture::Encoded>,
+    user_text: Option<String>,
     id: &str,
     cancel: Arc<AtomicBool>,
     target: &'static str,
 ) -> Result<providers::Translation, String> {
     let mime = images.first().map(|e| e.mime).unwrap_or("image/png");
+    let kind = if user_text.is_some() { "text" } else { "image" };
     let b64s: Vec<String> = images.iter().map(|e| base64_encode(&e.bytes)).collect();
     let started_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -557,6 +684,7 @@ async fn execute(
             image_count: images.len(),
             target: target.to_string(),
             text: String::new(),
+            kind: kind.to_string(),
             done: false,
             started_ms,
         };
@@ -570,6 +698,7 @@ async fn execute(
             "stream": cfg.stream,
             "image_count": images.len(),
             "target": target,
+            "kind": kind,
         }),
     );
 
@@ -583,6 +712,7 @@ async fn execute(
             cfg,
             &b64s,
             mime,
+            user_text.as_deref(),
             cancel,
             move |delta| {
                 {
@@ -607,7 +737,7 @@ async fn execute(
         finish_run(app, &result);
         result
     } else {
-        let result = providers::translate(client, cfg, &b64s, mime).await;
+        let result = providers::translate(client, cfg, &b64s, mime, user_text.as_deref()).await;
         finish_run(app, &result);
         result
     }
@@ -704,7 +834,7 @@ fn trigger_repeat(app: &AppHandle) {
         let cancel = Arc::new(AtomicBool::new(false));
         *st.cancel.lock().unwrap() = cancel.clone();
 
-        match execute(&handle, &client, &cfg, vec![send], &id, cancel, target).await {
+        match execute(&handle, &client, &cfg, vec![send], None, &id, cancel, target).await {
             Ok(result) => {
                 let ts = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
                 let stored = {
@@ -759,7 +889,11 @@ pub fn run() {
                     if event.state() != ShortcutState::Pressed {
                         return;
                     }
-                    if shortcut.key == Code::KeyD {
+                    let cfg = app.state::<AppState>().cfg.lock().unwrap().clone();
+                    let is_repeat = parse_hotkeys(&cfg)
+                        .map(|(_, repeat)| *shortcut == repeat)
+                        .unwrap_or(false);
+                    if is_repeat {
                         trigger_repeat(app);
                     } else {
                         trigger_capture(app);
@@ -815,43 +949,35 @@ pub fn run() {
                 });
             }
 
-            // global hotkeys: Ctrl+Alt+S 截图, Ctrl+Alt+D 重复上次区域
-            let capture_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);
-            let repeat_key = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyD);
-            for key in [capture_key, repeat_key] {
-                if let Err(e) = app.global_shortcut().register(key.clone()) {
-                    // A previous instance may still be releasing the hotkey during an upgrade;
-                    // retry briefly instead of silently losing the shortcut for the session.
-                    eprintln!("global shortcut registration failed ({e}); retrying");
+            // global hotkeys come from the config; a conflict here is retried
+            // (an upgraded instance may still be holding the old registration).
+            {
+                let cfg_now = app.state::<AppState>().cfg.lock().unwrap().clone();
+                if let Err(e) = apply_hotkeys(app.handle(), &cfg_now) {
+                    eprintln!("hotkey registration: {e}; retrying");
                     let handle = app.handle().clone();
+                    let retry_cfg = cfg_now.clone();
                     std::thread::spawn(move || {
                         for _ in 0..6 {
                             std::thread::sleep(std::time::Duration::from_millis(700));
-                            if handle.global_shortcut().register(key.clone()).is_ok() {
-                                eprintln!("global shortcut registered after retry");
+                            if apply_hotkeys(&handle, &retry_cfg).is_ok() {
+                                eprintln!("hotkeys registered after retry");
                                 return;
                             }
                         }
-                        eprintln!("global shortcut still unavailable — use the tray menu to capture");
+                        eprintln!("hotkeys still unavailable — use the tray menu");
                     });
                 }
             }
 
             // tray
-            let shot_item = MenuItem::with_id(app, "shot", "截图翻译", true, Some("Ctrl+Alt+S"))?;
-            let repeat_item = MenuItem::with_id(app, "repeat", "重复上次区域", true, Some("Ctrl+Alt+D"))?;
-            let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
-            let sep = PredefinedMenuItem::separator(app)?;
-            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(
-                app,
-                &[&shot_item, &repeat_item, &show_item, &sep, &quit_item],
-            )?;
+            let cfg_tray = app.state::<AppState>().cfg.lock().unwrap().clone();
+            let menu = build_tray_menu(app.handle(), &cfg_tray)?;
 
             let mut builder = TrayIconBuilder::with_id("main")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
-                .tooltip("截译 · Ctrl+Alt+S 截图")
+                .tooltip(format!("截译 · {} 截图", cfg_tray.hotkey_capture))
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     "shot" => trigger_capture(app),
                     "repeat" => trigger_repeat(app),
@@ -897,6 +1023,7 @@ pub fn run() {
             cancel_overlay,
             cancel_translation,
             translate_regions,
+            translate_text,
             retranslate,
             test_connection
         ])

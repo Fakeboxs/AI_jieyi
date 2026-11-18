@@ -25,6 +25,8 @@ export const MOCK_CONFIG: Config = {
   image_max_edge: 1440,
   image_quality: 86,
   thinking: "off",
+  hotkey_capture: "Ctrl+Alt+S",
+  hotkey_repeat: "Ctrl+Alt+D",
   advanced: { endpoint: "", headers: [], body: "", response_path: "" },
 };
 

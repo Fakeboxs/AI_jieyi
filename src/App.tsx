@@ -6,6 +6,7 @@ import {
   Moon,
   ScanLine,
   Settings2,
+  Type,
   Sun,
 } from "lucide-react";
 import type { Config, Entry, Status } from "./types";
@@ -27,17 +28,20 @@ import {
   saveConfig,
   startCapture,
   testConnection,
+  translateText,
   updateTags,
 } from "./lib/bridge";
 import { Archive } from "./components/Archive";
 import { ResultCard, ResultSkeleton, StreamingResult } from "./components/Reader";
+import { ManualTranslate } from "./components/ManualTranslate";
 import { Settings } from "./components/Settings";
 import { Kbd, Toasts, type ToastItem } from "./components/ui";
 
-type Tab = "translate" | "archive" | "settings";
+type Tab = "translate" | "manual" | "archive" | "settings";
 
 const TABS: { id: Tab; label: string; icon: typeof Languages; title: string; sub: string }[] = [
   { id: "translate", label: "翻译", icon: Languages, title: "翻译", sub: "截图 → 识别 → 译文，全程不用离开键盘" },
+  { id: "manual", label: "文本", icon: Type, title: "文本翻译", sub: "把外文粘进来直接翻，不用截图" },
   { id: "archive", label: "归档", icon: ArchiveIcon, title: "归档", sub: "每一次翻译都会自动保存，可搜索、可打标签" },
   { id: "settings", label: "设置", icon: Settings2, title: "设置", sub: "模型服务、提示词与外观" },
 ];
@@ -55,12 +59,16 @@ export default function App() {
     model: string;
     progressive: boolean;
     imageCount: number;
+    kind: "image" | "text";
   } | null>(null);
+  const [manualId, setManualId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const toastSeq = useRef(0);
   const streamBuf = useRef({ text: "", last: 0, timer: 0 });
   // true while the current run renders in the popup window instead of this one
   const popupTarget = useRef(false);
+  // what kind of run is currently streaming (image capture vs pasted text)
+  const streamKind = useRef<"image" | "text">("image");
   const contentRef = useRef<HTMLDivElement>(null);
 
   const toast = useCallback((text: string, tone: "default" | "error" = "default") => {
@@ -99,6 +107,7 @@ export default function App() {
         popupTarget.current = payload.target === "popup";
         if (popupTarget.current) return;
         streamBuf.current = { text: "", last: 0, timer: 0 };
+        const kind = payload.kind === "text" ? "text" : "image";
         setStream({
           id: payload.id,
           text: "",
@@ -106,9 +115,15 @@ export default function App() {
           model: payload.model,
           progressive: payload.stream,
           imageCount: payload.image_count ?? 1,
+          kind,
         });
+        streamKind.current = kind;
         setStatus("translating");
-        setTab("translate");
+        if (kind === "text") {
+          setManualId(null);
+        } else {
+          setTab("translate");
+        }
       }),
     );
 
@@ -142,10 +157,15 @@ export default function App() {
           setStatus("idle");
           return;
         }
+        const wasText = streamKind.current === "text";
         setStream(null);
         await refresh(false);
         setCurrentId(id);
-        setTab("translate");
+        if (wasText) {
+          setManualId(id);
+        } else {
+          setTab("translate");
+        }
         setStatus("idle");
         if (cancelled) toast("已停止生成，保留了已生成的部分");
       }),
@@ -205,7 +225,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      const map: Record<string, Tab> = { "1": "translate", "2": "archive", "3": "settings" };
+      const map: Record<string, Tab> = { "1": "translate", "2": "manual", "3": "archive", "4": "settings" };
       const next = map[e.key];
       if (next) {
         e.preventDefault();
@@ -230,6 +250,15 @@ export default function App() {
     } catch (e) {
       toast(`截图失败：${String(e)}`, "error");
     } finally {
+      setStatus("idle");
+    }
+  }
+
+  async function handleManualTranslate(text: string) {
+    try {
+      await translateText(text);
+    } catch (e) {
+      toast(`翻译失败：${String(e)}`, "error");
       setStatus("idle");
     }
   }
@@ -405,6 +434,37 @@ export default function App() {
                 </div>
               </div>
             )
+          ) : null}
+
+          {tab === "manual" ? (
+            <ManualTranslate
+              streaming={
+                stream && stream.kind === "text"
+                  ? {
+                      text: stream.text,
+                      provider: stream.provider,
+                      model: stream.model,
+                      progressive: stream.progressive,
+                    }
+                  : null
+              }
+              busy={Boolean(stream && stream.kind === "text")}
+              onTranslate={handleManualTranslate}
+              onCancel={() => void cancelTranslation()}
+              toast={toast}
+              result={
+                manualId && entries.find((e) => e.id === manualId) ? (
+                  <ResultCard
+                    entry={entries.find((e) => e.id === manualId)!}
+                    onDelete={handleDelete}
+                    onRetranslate={handleRetranslate}
+                    onUpdateTags={handleUpdateTags}
+                    onExport={handleExport}
+                    toast={toast}
+                  />
+                ) : null
+              }
+            />
           ) : null}
 
           {tab === "archive" ? (

@@ -48,6 +48,9 @@ pub struct Config {
     /// 思考模式：off = 显式关闭（DeepSeek 默认开启，翻译会白等几秒）；
     /// default = 不干预；on = 显式开启
     pub thinking: String,
+    /// 全局快捷键（"Ctrl+Alt+S" 这样的写法）
+    pub hotkey_capture: String,
+    pub hotkey_repeat: String,
     pub advanced: Advanced,
 }
 
@@ -69,6 +72,8 @@ impl Default for Config {
             image_max_edge: 1440,
             image_quality: 86,
             thinking: "off".into(),
+            hotkey_capture: "Ctrl+Alt+S".into(),
+            hotkey_repeat: "Ctrl+Alt+D".into(),
             advanced: Advanced::default(),
         }
     }

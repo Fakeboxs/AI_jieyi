@@ -48,6 +48,10 @@ export interface Config {
   image_quality: number;
   /** "off" = 显式关闭思考（DeepSeek 默认开启）；"default" = 不干预；"on" = 开启 */
   thinking: "off" | "default" | "on";
+  /** 全局截图快捷键，如 "Ctrl+Alt+S" */
+  hotkey_capture: string;
+  /** 重复上次区域快捷键，如 "Ctrl+Alt+D" */
+  hotkey_repeat: string;
   advanced: AdvancedConfig;
 }
 
@@ -59,6 +63,8 @@ export interface TranslationStart {
   image_count: number;
   /** 这次结果该显示在哪里 */
   target?: "popup" | "main";
+  /** image = 截图翻译；text = 手动粘贴的文本 */
+  kind?: "image" | "text";
 }
 
 export interface ShotReady {

@@ -58,8 +58,23 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write(
             f"[mock] POST {self.path} auth={auth[:12]}… images={images} bytes={length} stream={streaming}\n"
         )
+        # images == 0 is the manual "paste text" path: answer with a text reply.
         if images == 0:
-            self._send(400, {"error": {"message": "no image in request"}})
+            if streaming:
+                self._stream(body)
+            else:
+                self._send(200, {
+                    "id": "chatcmpl-mock",
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": MARKDOWN},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {},
+                })
             return
         if streaming:
             self._stream(body)

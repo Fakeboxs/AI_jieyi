@@ -120,7 +120,14 @@ fn api_error(status: reqwest::StatusCode, body: &str) -> String {
 }
 
 /// Substitute `{{…}}` placeholders inside an advanced-template string.
-fn render_template(tpl: &str, cfg: &Config, images_b64: &[String], mime: &str, stream: bool) -> String {
+fn render_template(
+    tpl: &str,
+    cfg: &Config,
+    images_b64: &[String],
+    mime: &str,
+    user_text: Option<&str>,
+    stream: bool,
+) -> String {
     let data_urls: Vec<String> = images_b64
         .iter()
         .map(|b| format!("data:{mime};base64,{b}"))
@@ -151,6 +158,8 @@ fn render_template(tpl: &str, cfg: &Config, images_b64: &[String], mime: &str, s
         .replace("{{image_data}}", images_b64.first().map(String::as_str).unwrap_or(""))
         .replace("{{image_parts}}", &parts_json)
         .replace("{{images}}", &images_json)
+        .replace("{{text_json}}", &serde_json::to_string(user_text.unwrap_or("")).unwrap_or_default())
+        .replace("{{text}}", user_text.unwrap_or(""))
 }
 
 /// Used when the user opens the advanced template without editing it.
@@ -174,6 +183,7 @@ fn build_request(
     cfg: &Config,
     images_b64: &[String],
     mime: &str,
+    user_text: Option<&str>,
     stream: bool,
 ) -> Result<reqwest::RequestBuilder, String> {
     if cfg.provider != "advanced" && cfg.api_key.trim().is_empty() {
@@ -199,12 +209,20 @@ fn build_request(
                 })
                 .collect();
             content.push(json!({ "type": "text", "text": cfg.prompt }));
-            let mut body = json!({
-                "model": model,
-                "max_tokens": cfg.max_tokens,
-                "temperature": cfg.temperature,
-                "messages": [{ "role": "user", "content": content }]
-            });
+            let mut body = match user_text {
+                Some(text) => json!({
+                    "model": model,
+                    "max_tokens": cfg.max_tokens,
+                    "system": cfg.prompt,
+                    "messages": [{ "role": "user", "content": [{ "type": "text", "text": text }] }]
+                }),
+                None => json!({
+                    "model": model,
+                    "max_tokens": cfg.max_tokens,
+                    "temperature": cfg.temperature,
+                    "messages": [{ "role": "user", "content": content }]
+                }),
+            };
             if stream {
                 body["stream"] = json!(true);
             }
@@ -231,26 +249,34 @@ fn build_request(
                 .map(|b| json!({ "inline_data": { "mime_type": mime, "data": b } }))
                 .collect();
             parts.push(json!({ "text": cfg.prompt }));
-            client.post(url).json(&json!({
-                "contents": [{ "role": "user", "parts": parts }],
-                "generationConfig": {
-                    "maxOutputTokens": cfg.max_tokens,
-                    "temperature": cfg.temperature
-                }
-            }))
+            let body = match user_text {
+                Some(text) => json!({
+                    "systemInstruction": { "parts": [{ "text": cfg.prompt }] },
+                    "contents": [{ "role": "user", "parts": [{ "text": text }] }],
+                    "generationConfig": { "maxOutputTokens": cfg.max_tokens }
+                }),
+                None => json!({
+                    "contents": [{ "role": "user", "parts": parts }],
+                    "generationConfig": {
+                        "maxOutputTokens": cfg.max_tokens,
+                        "temperature": cfg.temperature
+                    }
+                }),
+            };
+            client.post(url).json(&body)
         }
         "advanced" => {
             let a = &cfg.advanced;
             if a.endpoint.trim().is_empty() {
                 return Err("高级模板还没填 endpoint（设置 → 高级 API）".into());
             }
-            let url = render_template(a.endpoint.trim(), cfg, images_b64, mime, stream);
+            let url = render_template(a.endpoint.trim(), cfg, images_b64, mime, user_text, stream);
             let body_tpl = if a.body.trim().is_empty() {
                 ADVANCED_BODY_EXAMPLE.to_string()
             } else {
                 a.body.clone()
             };
-            let rendered = render_template(&body_tpl, cfg, images_b64, mime, stream);
+            let rendered = render_template(&body_tpl, cfg, images_b64, mime, user_text, stream);
             let mut body: Value = serde_json::from_str(&rendered)
                 .map_err(|e| format!("模板渲染后的请求体不是合法 JSON：{e}"))?;
             // Streaming is decided by the app, not by the template: inject it only
@@ -264,7 +290,7 @@ fn build_request(
                 if h.key.trim().is_empty() {
                     continue;
                 }
-                req = req.header(h.key.trim(), render_template(&h.value, cfg, images_b64, mime, stream));
+                req = req.header(h.key.trim(), render_template(&h.value, cfg, images_b64, mime, user_text, stream));
             }
             req.json(&body)
         }
@@ -280,12 +306,23 @@ fn build_request(
                 })
                 .collect();
             content.push(json!({ "type": "text", "text": cfg.prompt }));
-            let mut body = json!({
-                "model": model,
-                "max_tokens": cfg.max_tokens,
-                "temperature": cfg.temperature,
-                "messages": [{ "role": "user", "content": content }]
-            });
+            let mut body = match user_text {
+                Some(text) => json!({
+                    "model": model,
+                    "max_tokens": cfg.max_tokens,
+                    "temperature": cfg.temperature,
+                    "messages": [
+                        { "role": "system", "content": cfg.prompt },
+                        { "role": "user", "content": text }
+                    ]
+                }),
+                None => json!({
+                    "model": model,
+                    "max_tokens": cfg.max_tokens,
+                    "temperature": cfg.temperature,
+                    "messages": [{ "role": "user", "content": content }]
+                }),
+            };
             if stream {
                 body["stream"] = json!(true);
             }
@@ -316,9 +353,10 @@ pub async fn translate(
     cfg: &Config,
     images_b64: &[String],
     mime: &str,
+    user_text: Option<&str>,
 ) -> Result<Translation, String> {
     let started = Instant::now();
-    let resp = build_request(client, cfg, images_b64, mime, false)?
+    let resp = build_request(client, cfg, images_b64, mime, user_text, false)?
         .send()
         .await
         .map_err(|e| format!("请求失败：{e}"))?;
@@ -347,12 +385,13 @@ pub async fn translate_stream<F: FnMut(&str), G: FnMut(usize)>(
     cfg: &Config,
     images_b64: &[String],
     mime: &str,
+    user_text: Option<&str>,
     cancel: Arc<AtomicBool>,
     mut on_delta: F,
     mut on_thought: G,
 ) -> Result<Translation, String> {
     let started = Instant::now();
-    let resp = build_request(client, cfg, images_b64, mime, true)?
+    let resp = build_request(client, cfg, images_b64, mime, user_text, true)?
         .send()
         .await
         .map_err(|e| format!("请求失败：{e}"))?;

@@ -81,6 +81,8 @@ export function Settings({
   }, []);
 
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(config), [draft, config]);
+  const hotkeyConflict =
+    draft.hotkey_capture.trim().toLowerCase() === draft.hotkey_repeat.trim().toLowerCase();
 
   function patch(p: Partial<Config>) {
     setDraft((d) => ({ ...d, ...p }));
@@ -98,6 +100,10 @@ export function Settings({
   }
 
   async function save() {
+    if (hotkeyConflict) {
+      toast("两个功能不能绑定同一个快捷键", "error");
+      return;
+    }
     setSaving(true);
     try {
       await onSave(draft);
@@ -506,16 +512,33 @@ export function Settings({
         </div>
       </Section>
 
-      <Section title="快捷键与数据" desc="快捷键在任意应用内生效">
-        <div className="hint-strip">
-          <span>截图翻译</span>
-          <span className="kbd">
-            <kbd>Ctrl</kbd>
-            <kbd>Alt</kbd>
-            <kbd>S</kbd>
-          </span>
-          <span style={{ marginLeft: 8 }}>Esc 取消选区</span>
+      <Section title="快捷键与数据" desc="全局快捷键在任意应用内生效，点一下后按新组合即可改绑">
+        <div className="field">
+          <label>截图翻译</label>
+          <HotkeyPicker
+            ariaLabel="截图翻译快捷键"
+            value={draft.hotkey_capture}
+            onChange={(next) => patch({ hotkey_capture: next })}
+          />
         </div>
+        <div className="field">
+          <label>重复上次区域</label>
+          <HotkeyPicker
+            ariaLabel="重复上次区域快捷键"
+            value={draft.hotkey_repeat}
+            onChange={(next) => patch({ hotkey_repeat: next })}
+          />
+        </div>
+        {hotkeyConflict ? (
+          <div className="banner banner-danger">
+            <Info size={14} />
+            <span>两个功能不能绑定同一个快捷键，换一个再保存。</span>
+          </div>
+        ) : (
+          <span className="hint">
+            组合键至少包含一个修饰键（Ctrl / Alt / Shift / Super）。保存时会真的去系统里注册一次：如果这个组合已被其它程序占用，会立刻报错并保留原来的绑定。
+          </span>
+        )}
         <div className="banner">
           <Info size={14} />
           <span>归档存放在应用数据目录的 jieyi.db 与 images/ 下，可以直接备份或迁移旧版 history.db。</span>
@@ -523,12 +546,122 @@ export function Settings({
       </Section>
 
       <div className="settings-foot">
-        <button className="btn btn-primary" onClick={save} disabled={!dirty || saving}>
+        <button className="btn btn-primary" onClick={save} disabled={!dirty || saving || hotkeyConflict}>
           <Save size={14} />
           {saving ? "保存中…" : dirty ? "保存设置" : "已保存"}
         </button>
         {dirty ? <span className="status">有未保存的修改</span> : null}
       </div>
     </div>
+  );
+}
+
+const KEY_LABELS: Record<string, string> = {
+  Space: "Space",
+  ArrowUp: "Up",
+  ArrowDown: "Down",
+  ArrowLeft: "Left",
+  ArrowRight: "Right",
+  Backquote: "`",
+  Minus: "-",
+  Equal: "=",
+  BracketLeft: "[",
+  BracketRight: "]",
+  Backslash: "\\",
+  Semicolon: ";",
+  Quote: "'",
+  Comma: ",",
+  Period: ".",
+  Slash: "/",
+};
+
+/** "KeyS" -> "S", "Digit1" -> "1", "F5" -> "F5" */
+function keyFromEvent(e: KeyboardEvent): string | null {
+  const fromCode = keyFromCode(e.code || "");
+  if (fromCode) return fromCode;
+  // Synthetic input (automation, some IMEs) can arrive without a usable `code`;
+  // fall back to the printed key so the binding is still recorded.
+  const k = e.key || "";
+  if (/^[a-zA-Z]$/.test(k)) return k.toUpperCase();
+  if (/^[0-9]$/.test(k)) return k;
+  if (/^F[0-9]{1,2}$/.test(k)) return k;
+  if (k === " ") return "Space";
+  if (k.length === 1) return k.toUpperCase();
+  return null;
+}
+
+function keyFromCode(code: string): string | null {
+  if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+  if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+  if (/^Numpad[0-9]$/.test(code)) return `Num${code.slice(6)}`;
+  if (/^F[0-9]{1,2}$/.test(code)) return code;
+  if (KEY_LABELS[code]) return KEY_LABELS[code];
+  if (code === "Escape") return null;
+  if (code.startsWith("Control") || code.startsWith("Alt") || code.startsWith("Shift") || code.startsWith("Meta")) {
+    return null; // modifier alone is not a binding
+  }
+  return code || null;
+}
+
+export function HotkeyPicker({
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  ariaLabel: string;
+}) {
+  const [recording, setRecording] = useState(false);
+
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        setRecording(false);
+        return;
+      }
+      const mods: string[] = [];
+      if (e.ctrlKey) mods.push("Ctrl");
+      if (e.altKey) mods.push("Alt");
+      if (e.shiftKey) mods.push("Shift");
+      if (e.metaKey) mods.push("Super");
+      const key = keyFromEvent(e);
+      if (!key) return; // still holding only modifiers
+      if (mods.length === 0) {
+        // a bare letter would swallow normal typing everywhere: refuse it
+        return;
+      }
+      onChange([...mods, key].join("+"));
+      setRecording(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [recording, onChange]);
+
+  const parts = value.split("+").filter(Boolean);
+
+  return (
+    <button
+      type="button"
+      className={recording ? "hotkey-field is-recording" : "hotkey-field"}
+      onClick={() => setRecording((v) => !v)}
+      aria-label={ariaLabel}
+      title="点一下，然后按下想要的组合键（Esc 取消）"
+    >
+      {recording ? (
+        <span className="hotkey-hint">按下组合键…（Esc 取消）</span>
+      ) : parts.length ? (
+        <span className="kbd">
+          {parts.map((p, i) => (
+            <kbd key={`${p}-${i}`}>{p}</kbd>
+          ))}
+        </span>
+      ) : (
+        <span className="hotkey-hint">未设置</span>
+      )}
+    </button>
   );
 }

@@ -111,6 +111,12 @@ export async function clearEntries(): Promise<number> {
   return call<number>("clear_entries");
 }
 
+/** Translate pasted text (no screenshot) through the same streaming pipeline. */
+export async function translateText(text: string): Promise<void> {
+  if (!inTauri) return;
+  await call<void>("translate_text", { text });
+}
+
 export async function hidePopup(): Promise<void> {
   if (!inTauri) return;
   await call<void>("hide_popup");

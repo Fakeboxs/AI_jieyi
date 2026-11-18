@@ -107,15 +107,17 @@ export function ResultCard({
           >
             <Download size={15} />
           </button>
-          <button
-            className="btn btn-ghost btn-icon"
-            onClick={() => onRetranslate(entry.id)}
-            title="重新翻译"
-            aria-label="重新翻译"
-            disabled={busy}
-          >
-            <RefreshCw size={15} />
-          </button>
+          {entry.images.length > 0 ? (
+            <button
+              className="btn btn-ghost btn-icon"
+              onClick={() => onRetranslate(entry.id)}
+              title="重新翻译"
+              aria-label="重新翻译"
+              disabled={busy}
+            >
+              <RefreshCw size={15} />
+            </button>
+          ) : null}
           <button
             className="btn btn-danger btn-icon"
             onClick={() => onDelete(entry.id)}
