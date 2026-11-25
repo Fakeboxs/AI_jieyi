@@ -4,6 +4,9 @@ import type { Config, Provider } from "../types";
 import {
   deletePack,
   downloadPack,
+  hotkeyStatus,
+  reregisterHotkeys,
+  type HotkeyStatus,
   listMonitors,
   offlineLanguages,
   localStatus,
@@ -88,11 +91,16 @@ export function Settings({
   const [draft, setDraft] = useState<Config>(config);
   const [showKey, setShowKey] = useState(false);
   const [monitors, setMonitors] = useState<{ index: number; name: string; width: number; height: number }[]>([]);
+  const [hk, setHk] = useState<HotkeyStatus | null>(null);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
 
   useEffect(() => setDraft(config), [config]);
+
+  useEffect(() => {
+    hotkeyStatus().then(setHk).catch(() => setHk(null));
+  }, []);
 
   useEffect(() => {
     listMonitors()
@@ -553,6 +561,26 @@ export function Settings({
             onChange={(next) => patch({ hotkey_repeat: next })}
           />
         </div>
+        <div className="hotkey-state">
+          <span className={`chip ${hk?.capture_ok ? "is-ok" : "is-bad"}`}>
+            {hk?.capture_ok ? "截图键已注册" : "截图键未注册"}
+          </span>
+          <span className={`chip ${hk?.repeat_ok ? "is-ok" : "is-bad"}`}>
+            {hk?.repeat_ok ? "重复键已注册" : "重复键未注册"}
+          </span>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={async () => {
+              const next = await reregisterHotkeys();
+              setHk(next);
+              toast(next?.capture_ok ? "快捷键已重新注册" : next?.error ?? "注册失败", next?.capture_ok ? "default" : "error");
+            }}
+          >
+            重新注册
+          </button>
+          {hk?.error ? <span className="hint" style={{ color: "var(--danger)" }}>{hk.error}</span> : null}
+        </div>
+
         {hotkeyConflict ? (
           <div className="banner banner-danger">
             <Info size={14} />

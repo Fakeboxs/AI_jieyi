@@ -4,6 +4,7 @@ import {
   Camera,
   Languages,
   Moon,
+  AlertTriangle,
   ScanLine,
   Settings2,
   Type,
@@ -26,6 +27,9 @@ import {
   deleteEntries,
   exportMarkdown,
   saveConfig,
+  hotkeyStatus,
+  onHotkeyState,
+  reregisterHotkeys,
   startCapture,
   testConnection,
   translateText,
@@ -52,6 +56,7 @@ export default function App() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>("idle");
+  const [hotkeyErr, setHotkeyErr] = useState<string | null>(null);
   const [stream, setStream] = useState<{
     id: string;
     text: string;
@@ -92,6 +97,39 @@ export default function App() {
       setCurrentId(list[0]?.id ?? null);
     })();
   }, []);
+
+  // A hotkey stolen by another program used to fail silently (release builds
+  // have no console). Surface it and let the user re-register.
+  useEffect(() => {
+    let gone = false;
+    let off: (() => void) | null = null;
+    (async () => {
+      const s = await hotkeyStatus().catch(() => null);
+      if (!gone && s?.error) setHotkeyErr(s.error);
+      onHotkeyState((next) => {
+        if (next.error) setHotkeyErr(next.error);
+        else setHotkeyErr(null);
+      }).then((fn) => {
+        if (gone) fn();
+        else off = fn;
+      });
+    })();
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, []);
+
+  async function retryHotkeys() {
+    const s = await reregisterHotkeys().catch(() => null);
+    if (!s) return;
+    if (s.capture_ok && s.repeat_ok) {
+      setHotkeyErr(null);
+      toast("快捷键已重新注册");
+    } else {
+      setHotkeyErr(s.error ?? "快捷键注册失败");
+    }
+  }
 
   // Translation lifecycle: start → chunk* → done | error.
   // NB: under StrictMode effects mount twice and `listen()` resolves asynchronously,
@@ -388,6 +426,19 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {hotkeyErr ? (
+          <div className="banner banner-danger hotkey-banner" role="alert">
+            <AlertTriangle size={14} />
+            <span style={{ flex: 1, minWidth: 0 }}>{hotkeyErr}</span>
+            <button className="btn btn-soft" onClick={() => void retryHotkeys()}>
+              重新注册
+            </button>
+            <button className="btn btn-ghost" onClick={() => setHotkeyErr(null)}>
+              忽略
+            </button>
+          </div>
+        ) : null}
 
         <div className="content" ref={contentRef}>
           {tab === "translate" ? (

@@ -172,6 +172,32 @@ export async function onTranslationDone(cb: (payload: DonePayload) => void): Pro
   );
 }
 
+export type HotkeyStatus = {
+  capture_ok: boolean;
+  repeat_ok: boolean;
+  capture: string;
+  repeat: string;
+  error?: string | null;
+};
+
+export async function hotkeyStatus(): Promise<HotkeyStatus | null> {
+  if (!inTauri) return null;
+  return call<HotkeyStatus>("hotkey_status");
+}
+
+/** Try again — another program may have released the combination. */
+export async function reregisterHotkeys(): Promise<HotkeyStatus | null> {
+  if (!inTauri) return null;
+  return call<HotkeyStatus>("reregister_hotkeys");
+}
+
+export async function onHotkeyState(cb: (s: HotkeyStatus) => void): Promise<() => void> {
+  if (!inTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const un = await listen<HotkeyStatus>("hotkey:state", (e) => cb(e.payload));
+  return un;
+}
+
 export type PackInfo = {
   id: string;
   title: string;

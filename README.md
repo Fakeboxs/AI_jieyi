@@ -22,8 +22,8 @@ Ctrl + Alt + S  →  拖框（可框多块）→  Enter  →  译文（KaTeX 公
 
 | 文件 | 大小 | 适合 |
 |---|---|---|
-| `JieYi_0.7.0_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
-| `JieYi-0.7.0-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
+| `JieYi_0.7.1_x64-setup.exe` | 4.0 MB | 推荐（联网版）。只装程序，离线模型按需下载 |
+| `JieYi-0.7.1-portable-win64.zip` | 4.7 MB | 便携版，解压即用 |
 | 离线模型（不入库） | 39 MB / 2.8 GB / 1.1 GB | **资源包不随发布上传**，按下表链接自行下载，见「离线翻译」一节的目录结构 |
 
 首次运行若被 SmartScreen 拦下：**更多信息 → 仍要运行**（安装包未做代码签名）。
@@ -265,14 +265,14 @@ python scripts/make_release.py         # 汇总 dist-release：安装包 + 便�
 
 | 文件 | 说明 |
 |---|---|
-| `JieYi_0.7.0_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
-| `JieYi-0.7.0-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
+| `JieYi_0.7.1_x64-setup.exe` | NSIS 安装包，**当前用户安装**（`%LOCALAPPDATA%\截译`），中文向导，缺 WebView2 自动下载 |
+| `JieYi-0.7.1-portable-win64.zip` | 便携版：`jieyi.exe` + 使用说明，解压即用 |
 | `发布说明.md` / `SHA256SUMS.txt` | 面向用户的说明与校验和 |
 
 **未做代码签名**，分发时提醒用户：SmartScreen 提示 → 更多信息 → 仍要运行。要彻底消除需要签名证书：
 
 ```powershell
-signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.7.0_x64-setup.exe
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /a dist-release\JieYi_0.7.1_x64-setup.exe
 ```
 
 > 改了 `productName`（当前为「截译」）会同时改变安装目录、快捷方式与「应用」里的显示名；`identifier` 保持不变，所以升级不会丢数据。

@@ -44,6 +44,18 @@ pub struct AppState {
     run: Mutex<RunSnapshot>,
     /// llama-server sidecar for offline translation (None until first use)
     local: Mutex<Option<local::LocalServer>>,
+    /// result of the last global-shortcut registration attempt
+    hotkey: Mutex<HotkeyStatus>,
+}
+
+/// What the UI shows in 设置 → 快捷键与数据, so a stolen hotkey is never silent.
+#[derive(Clone, serde::Serialize, Default)]
+struct HotkeyStatus {
+    capture_ok: bool,
+    repeat_ok: bool,
+    capture: String,
+    repeat: String,
+    error: Option<String>,
 }
 
 #[derive(serde::Deserialize, Clone, Copy)]
@@ -439,6 +451,20 @@ fn ensure_local(app: &AppHandle, engine: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn hotkey_status(state: State<'_, AppState>) -> HotkeyStatus {
+    state.hotkey.lock().unwrap().clone()
+}
+
+/// Try to (re)register the configured hotkeys — used by the "重新注册" button
+/// when another program was holding the combination at startup.
+#[tauri::command]
+fn reregister_hotkeys(app: AppHandle, state: State<'_, AppState>) -> HotkeyStatus {
+    let cfg = state.cfg.lock().unwrap().clone();
+    let _ = apply_hotkeys(&app, &cfg);
+    state.hotkey.lock().unwrap().clone()
+}
+
+#[tauri::command]
 fn offline_status(state: State<'_, AppState>) -> Vec<models::PackInfo> {
     models::status(&state.config_dir)
 }
@@ -648,23 +674,57 @@ fn parse_hotkeys(cfg: &Config) -> Result<(Shortcut, Shortcut), String> {
 /// (Re)register both global hotkeys. Any conflict is reported to the caller so
 /// the settings dialog can show it instead of silently losing the shortcut.
 fn apply_hotkeys(app: &AppHandle, cfg: &Config) -> Result<(), String> {
-    let (cap, rep) = parse_hotkeys(cfg)?;
+    let mut status = HotkeyStatus {
+        capture: cfg.hotkey_capture.clone(),
+        repeat: cfg.hotkey_repeat.clone(),
+        ..Default::default()
+    };
+
+    let (cap, rep) = match parse_hotkeys(cfg) {
+        Ok(pair) => pair,
+        Err(e) => {
+            status.error = Some(e.clone());
+            publish_hotkeys(app, status);
+            return Err(e);
+        }
+    };
+
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
-    gs.register(cap).map_err(|e| {
-        format!(
+
+    if let Err(e) = gs.register(cap) {
+        let msg = format!(
             "「{}」注册失败：可能已被其它程序占用（{e}）",
             cfg.hotkey_capture
-        )
-    })?;
-    gs.register(rep).map_err(|e| {
+        );
+        status.error = Some(msg.clone());
+        publish_hotkeys(app, status);
+        return Err(msg);
+    }
+    status.capture_ok = true;
+
+    if let Err(e) = gs.register(rep) {
         let _ = gs.unregister(cap);
-        format!(
+        status.capture_ok = false;
+        let msg = format!(
             "「{}」注册失败：可能已被其它程序占用（{e}）",
             cfg.hotkey_repeat
-        )
-    })?;
+        );
+        status.error = Some(msg.clone());
+        publish_hotkeys(app, status);
+        return Err(msg);
+    }
+    status.repeat_ok = true;
+
+    publish_hotkeys(app, status);
     Ok(())
+}
+
+fn publish_hotkeys(app: &AppHandle, status: HotkeyStatus) {
+    if let Some(st) = app.try_state::<AppState>() {
+        *st.hotkey.lock().unwrap() = status.clone();
+    }
+    let _ = app.emit("hotkey:state", status);
 }
 
 fn build_tray_menu(app: &AppHandle, cfg: &Config) -> tauri::Result<Menu<tauri::Wry>> {
@@ -1142,6 +1202,7 @@ pub fn run() {
                 last_region: Mutex::new(last_region),
                 run: Mutex::new(RunSnapshot::default()),
                 local: Mutex::new(None),
+                hotkey: Mutex::new(HotkeyStatus::default()),
             });
 
             // Warm DNS/TLS so the first screenshot does not pay the handshake.
@@ -1179,6 +1240,19 @@ pub fn run() {
                             }
                         }
                         eprintln!("hotkeys still unavailable — use the tray menu");
+                        // Tell the UI instead of dying quietly: the user has no
+                        // console in a release build.
+                        if let Some(st) = handle.try_state::<AppState>() {
+                            let mut s = st.hotkey.lock().unwrap().clone();
+                            if s.error.is_none() {
+                                s.error = Some(format!(
+                                    "「{}」始终注册不上，可能被其它程序占用；可在设置里换个组合或点「重新注册」",
+                                    retry_cfg.hotkey_capture
+                                ));
+                            }
+                            drop(st);
+                            publish_hotkeys(&handle, s);
+                        }
                     });
                 }
             }
@@ -1239,6 +1313,8 @@ pub fn run() {
             translate_text,
             retranslate,
             test_connection,
+            hotkey_status,
+            reregister_hotkeys,
             offline_status,
             local_status,
             start_local_engine,

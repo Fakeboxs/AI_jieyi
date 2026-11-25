@@ -933,6 +933,22 @@ html:has(.popup-root), body:has(.popup-root), body:has(.popup-root) #root { back
 @keyframes sheen { to { transform: translateX(100%); } }
 @keyframes ghost-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.95; } }
 
+/* hotkey diagnostics */
+.hotkey-banner {
+  margin: 12px 24px 0;
+  align-items: center;
+}
+.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.hotkey-state { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chip.is-ok {
+  background: var(--accent-soft); color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.chip.is-bad {
+  background: var(--danger-soft); color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 26%, transparent);
+}
+
 /* settings: hotkey recorder */
 .hotkey-field {
   display: inline-flex; align-items: center; gap: 6px;
